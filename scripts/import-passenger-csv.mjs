@@ -29,6 +29,7 @@ const rows = parse(text, {
   skip_empty_lines: true,
   relax_column_count: true,
   relax_quotes: true,
+  skip_records_with_error: true,
   trim: true,
 });
 
