@@ -20,6 +20,12 @@ function formatClockFromNow(sec) {
   return d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false });
 }
 
+function formatSourceMonth(value) {
+  const s = String(value || '');
+  const m = s.match(/^(\d{4})[-.]?(\d{2})$/);
+  return m ? `${m[1]}-${m[2]}` : s;
+}
+
 function stationLabel(s) {
   if (!s) return '정류장 선택';
   return `${String(s.seq).padStart(2, '0')} · ${s.stationNm}${s.arsId ? ` · ${s.arsId}` : ''}`;
@@ -40,7 +46,30 @@ function setModeBadge(mode, note = '') {
   if (mode === 'live') badge.textContent = 'LIVE API';
   else if (mode === 'demo') badge.textContent = 'DEMO';
   else if (mode === 'fallback') badge.textContent = 'API 확인 필요';
+  else if (mode === 'stale') badge.textContent = 'STALE';
   else badge.textContent = note || '연결 중';
+}
+
+function clearRealtimeData() {
+  $('nextBusEta').textContent = '-';
+  $('nextBusMessage').textContent = '도착 정보 없음';
+  $('actualHeadway').textContent = '-';
+  $('scheduledHeadway').textContent = '공식 배차 -';
+  $('schoolEta').textContent = '-';
+  $('rideTime').textContent = '예상 이동시간 -';
+  $('runningCount').textContent = '-';
+
+  for (const idx of [1, 2]) {
+    $('busEta' + idx).textContent = '-';
+    $('busArrMsg' + idx).textContent = '도착정보 없음';
+    $('busNo' + idx).textContent = '-';
+    $('busSchool' + idx).textContent = '-';
+    $('lowFloor' + idx).textContent = '-';
+    const badge = $('congestion' + idx);
+    badge.className = 'congestion unknown';
+    badge.textContent = '정보 없음';
+    $('busMarker' + idx).style.display = 'none';
+  }
 }
 
 function setPickerOpen(open) {
@@ -149,9 +178,12 @@ function renderBus(bus, idx) {
   $('busEta' + idx).textContent = formatMinutes(bus?.etaSec);
   $('busArrMsg' + idx).textContent = bus?.arrMsg || '도착정보 없음';
   $('busNo' + idx).textContent = bus?.plainNo || '-';
-  $('busSchool' + idx).textContent = bus?.destinationEtaSec != null
-    ? `${formatClockFromNow(bus.destinationEtaSec)} · ${formatMinutes(bus.destinationEtaSec)}`
-    : '-';
+  if (bus?.destinationEtaSec != null) {
+    const sourceNote = bus.destinationEtaSource === 'vehicle-match' ? '' : ' · 추정';
+    $('busSchool' + idx).textContent = `${formatClockFromNow(bus.destinationEtaSec)} · ${formatMinutes(bus.destinationEtaSec)}${sourceNote}`;
+  } else {
+    $('busSchool' + idx).textContent = '-';
+  }
   $('lowFloor' + idx).textContent = bus?.lowFloor ? '예' : '아니오/미확인';
 
   const badge = $('congestion' + idx);
@@ -188,7 +220,7 @@ function renderHistorical(h) {
     $('histBoard').textContent = '-';
     $('histAlight').textContent = '-';
     $('histLevel').textContent = '미적재';
-    $('passengerSource').textContent = h?.sourceMonth ? `${h.sourceMonth} · 정류장 매칭 없음` : '승하차 데이터 미적재';
+    $('passengerSource').textContent = h?.sourceMonth ? `${formatSourceMonth(h.sourceMonth)} · 정류장 매칭 없음` : '승하차 데이터 미적재';
     $('histNote').textContent = '선택 정류장의 월간 승하차 데이터를 찾지 못했습니다';
     return;
   }
@@ -197,10 +229,11 @@ function renderHistorical(h) {
   $('histBoard').textContent = `${Number(h.board).toFixed(1)}명`;
   $('histAlight').textContent = `${Number(h.alight).toFixed(1)}명`;
   $('histLevel').textContent = demandLabel(h.level);
-  $('passengerSource').textContent = `${h.sourceMonth || '월간 데이터'}${h.demo ? ' · DEMO' : ''}`;
+  const sourceMonth = formatSourceMonth(h.sourceMonth || '월간 데이터');
+  $('passengerSource').textContent = `${sourceMonth}${h.valueBasis === 'daily-average' ? ' · 시간대 일평균' : ''}${h.demo ? ' · DEMO' : ''}`;
   $('histNote').textContent = h.ambiguousName
-    ? '같은 이름의 양방향 정류장을 합산한 참고값입니다'
-    : '시간대별 교통카드 승하차 패턴입니다';
+    ? '같은 이름의 양방향 정류장을 합산한 일평균 참고값입니다'
+    : '해당 월의 시간대별 일평균 교통카드 승하차 패턴입니다';
 
   const max = Math.max(1, ...(h.hours || []).map((x) => Number(x.board || 0)));
   (h.hours || []).forEach((x) => {
@@ -214,6 +247,7 @@ function renderHistorical(h) {
 
 function render(data) {
   currentDashboard = data;
+  setModeBadge(data.mode || bootstrap?.mode || 'live');
   const rec = data.recommendation || {};
   $('recommendationTitle').textContent = rec.title || '7016 확인';
   $('recommendationReason').textContent = rec.reason || '';
@@ -225,7 +259,12 @@ function render(data) {
   $('actualHeadway').textContent = data.actualHeadwayMin == null ? '-' : `${data.actualHeadwayMin}분`;
   $('scheduledHeadway').textContent = `공식 배차 ${data.scheduledTermMin ?? '-'}분`;
   $('schoolEta').textContent = formatClockFromNow(b1?.destinationEtaSec);
-  $('rideTime').textContent = b1?.destinationEtaSec == null ? '예상 이동시간 -' : `지금부터 약 ${formatMinutes(b1.destinationEtaSec)}`;
+  if (b1?.destinationEtaSec == null) {
+    $('rideTime').textContent = '예상 이동시간 -';
+  } else {
+    const sourceNote = b1.destinationEtaSource === 'vehicle-match' ? '실시간 예측' : '구간 추정';
+    $('rideTime').textContent = `지금부터 약 ${formatMinutes(b1.destinationEtaSec)} · ${sourceNote}`;
+  }
   $('runningCount').textContent = data.runningBusCount == null ? '-' : `${data.runningBusCount}대`;
 
   renderBus(data.buses?.[0], 1);
@@ -270,9 +309,13 @@ async function loadDashboard(options = {}) {
     $('refreshStatus').textContent = `${new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })} 갱신 완료`;
   } catch (err) {
     if (err.name === 'AbortError' || requestId !== dashboardRequestId) return;
+    currentDashboard = null;
+    clearRealtimeData();
+    setModeBadge('stale');
     $('recommendationTitle').textContent = '실시간 API 연결 확인 필요';
     $('recommendationReason').textContent = err.message;
-    $('refreshStatus').textContent = 'API 연결 실패';
+    $('refreshStatus').textContent = 'API 연결 실패 · 실시간 값 숨김';
+    $('updatedAt').textContent = '갱신 실패';
   } finally {
     if (requestId === dashboardRequestId) setBusy(false);
   }
@@ -375,6 +418,7 @@ async function init() {
     if (!populated) throw new Error('정류장 목록이 비어 있습니다.');
 
     if (bootstrap.mode === 'fallback') {
+      clearRealtimeData();
       $('recommendationTitle').textContent = '정류장 목록은 정상적으로 불러왔어';
       $('recommendationReason').textContent = `실시간 서울 버스 API는 연결 확인이 필요해 · ${bootstrap.apiError}`;
       $('refreshStatus').textContent = '정류장 목록 fallback 사용 중';
@@ -388,6 +432,7 @@ async function init() {
     await loadDashboard({ manual: false });
     timer = setInterval(() => loadDashboard({ manual: false }), 30000);
   } catch (err) {
+    clearRealtimeData();
     setModeBadge('error', 'ERROR');
     $('recommendationTitle').textContent = '초기화 실패';
     $('recommendationReason').textContent = err.message;
