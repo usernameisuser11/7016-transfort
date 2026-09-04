@@ -28,6 +28,7 @@ const rows = parse(text, {
   columns: true,
   skip_empty_lines: true,
   relax_column_count: true,
+  relax_quotes: true,
   trim: true,
 });
 
@@ -46,7 +47,7 @@ function pickHeader(patterns) {
 
 const routeHeader = pickHeader([/노선번호/, /^노선$/, /busroute(no|nm|name)?/]);
 const stopIdHeader = pickHeader([/표준버스정류장(id|아이디)/, /정류장(id|아이디)/, /stationid/]);
-const stopNameHeader = pickHeader([/정류장명/, /stationname/, /stationnm/]);
+const stopNameHeader = pickHeader([/정류장명/, /^역명$/, /stationname/, /stationnm/]);
 const monthHeader = pickHeader([/사용년월/, /기준년월/, /useym/, /month/]);
 
 if (!routeHeader || !stopNameHeader) {
