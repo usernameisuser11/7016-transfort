@@ -1,4 +1,5 @@
 const $ = (id) => document.getElementById(id);
+
 let bootstrap = null;
 let timer = null;
 let currentDashboard = null;
@@ -31,6 +32,15 @@ function setBusy(v, status = '') {
   button.setAttribute('aria-busy', v ? 'true' : 'false');
   button.textContent = v ? '갱신 중' : '새로고침';
   if (status) $('refreshStatus').textContent = status;
+}
+
+function setModeBadge(mode, note = '') {
+  const badge = $('modeBadge');
+  badge.className = mode === 'live' ? 'status-chip live' : 'status-chip';
+  if (mode === 'live') badge.textContent = 'LIVE API';
+  else if (mode === 'demo') badge.textContent = 'DEMO';
+  else if (mode === 'fallback') badge.textContent = 'API 확인 필요';
+  else badge.textContent = note || '연결 중';
 }
 
 function setPickerOpen(open) {
@@ -90,25 +100,38 @@ function selectBoardingStation(seq, reload = false) {
   if (!station) return;
   $('boardingSelect').value = String(station.seq);
   $('boardingPickerText').textContent = stationLabel(station);
+  $('routeStartLabel').textContent = station.stationNm;
   localStorage.setItem('7016-board-seq', String(station.seq));
   setPickerOpen(false);
-  if (reload) loadDashboard({ manual: true });
+
+  if (reload && bootstrap?.mode !== 'fallback') {
+    loadDashboard({ manual: true });
+  } else if (reload && bootstrap?.mode === 'fallback') {
+    $('recommendationTitle').textContent = `${station.stationNm} 선택 완료`;
+    $('recommendationReason').textContent = '정류장 목록은 정상입니다. 실시간 서울 버스 API 인증을 확인하면 도착정보가 표시됩니다.';
+  }
 }
 
 function populateStations() {
   const stations = Array.isArray(bootstrap?.stations) ? bootstrap.stations : [];
-  const destinationDefault = Number(bootstrap?.destinationSeq);
-  const destination = stations.find((s) => Number(s.seq) === destinationDefault) || stations.find((s) => /상명대정문/.test(s.stationNm));
+  let destinationDefault = Number(bootstrap?.destinationSeq);
+  if (!Number.isFinite(destinationDefault)) {
+    destinationDefault = Number(stations.find((s) => /상명대정문/.test(s.stationNm))?.seq);
+  }
+
+  const destination = stations.find((s) => Number(s.seq) === destinationDefault)
+    || stations.find((s) => /상명대정문/.test(s.stationNm));
 
   boardingStations = stations.filter((s) => Number(s.seq) < destinationDefault);
   $('destinationSelect').value = Number.isFinite(destinationDefault) ? String(destinationDefault) : '';
   $('destinationText').textContent = destination?.stationNm || '상명대정문';
+  $('routeEndLabel').textContent = destination?.stationNm || '상명대정문';
 
   if (!boardingStations.length) {
     $('boardingPickerText').textContent = '정류장 목록을 불러오지 못했어';
     $('boardingPickerButton').classList.add('has-error');
     $('stopCountBadge').textContent = '정류장 오류';
-    return;
+    return false;
   }
 
   $('boardingPickerButton').classList.remove('has-error');
@@ -119,6 +142,7 @@ function populateStations() {
   selectBoardingStation(defaultStation.seq, false);
   renderBoardingOptions('');
   $('stopCountBadge').textContent = `학교 방향 ${bootstrap.stopCount || stations.length}개`;
+  return true;
 }
 
 function renderBus(bus, idx) {
@@ -129,15 +153,17 @@ function renderBus(bus, idx) {
     ? `${formatClockFromNow(bus.destinationEtaSec)} · ${formatMinutes(bus.destinationEtaSec)}`
     : '-';
   $('lowFloor' + idx).textContent = bus?.lowFloor ? '예' : '아니오/미확인';
+
   const badge = $('congestion' + idx);
   badge.className = `congestion ${bus?.congestion?.level || 'unknown'}`;
   badge.textContent = bus?.congestion?.label || '정보 없음';
 }
 
 function renderMarkers(data) {
-  const boardOrd = data.boarding.ord;
-  const destOrd = data.destination.ord;
+  const boardOrd = Number(data?.boarding?.ord);
+  const destOrd = Number(data?.destination?.ord);
   const span = Math.max(1, destOrd - boardOrd);
+
   [1, 2].forEach((n) => { $('busMarker' + n).style.display = 'none'; });
   (data.buses || []).slice(0, 2).forEach((bus, i) => {
     const marker = $('busMarker' + (i + 1));
@@ -156,6 +182,7 @@ function demandLabel(level) {
 function renderHistorical(h) {
   const bars = $('hourlyBars');
   bars.innerHTML = '';
+
   if (!h || !h.available) {
     $('histHour').textContent = '-';
     $('histBoard').textContent = '-';
@@ -190,7 +217,7 @@ function render(data) {
   const rec = data.recommendation || {};
   $('recommendationTitle').textContent = rec.title || '7016 확인';
   $('recommendationReason').textContent = rec.reason || '';
-  $('recommendationIcon').textContent = rec.action === 'WAIT_NEXT' ? '다음 차' : '이번 차';
+  $('recommendationIcon').textContent = rec.action === 'WAIT_NEXT' ? 'NEXT' : '7016';
 
   const b1 = data.buses?.[0];
   $('nextBusEta').textContent = formatMinutes(b1?.etaSec);
@@ -204,8 +231,8 @@ function render(data) {
   renderBus(data.buses?.[0], 1);
   renderBus(data.buses?.[1], 2);
   renderHistorical(data.historical);
-  $('routeStartLabel').textContent = data.boarding.stationNm;
-  $('routeEndLabel').textContent = data.destination.stationNm;
+  $('routeStartLabel').textContent = data.boarding?.stationNm || '승차';
+  $('routeEndLabel').textContent = data.destination?.stationNm || '상명대정문';
   $('updatedAt').textContent = `갱신 ${new Date(data.updatedAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`;
   renderMarkers(data);
 }
@@ -215,6 +242,7 @@ async function loadDashboard(options = {}) {
   const manual = Boolean(options.manual);
   const requestId = ++dashboardRequestId;
 
+  if (bootstrap.mode === 'fallback' && !manual) return;
   if (dashboardController) dashboardController.abort();
   dashboardController = new AbortController();
 
@@ -230,22 +258,21 @@ async function loadDashboard(options = {}) {
   setBusy(true, manual ? '수동 새로고침 중…' : '실시간 데이터 갱신 중…');
 
   try {
-    const nonce = Date.now();
-    const res = await fetch(`/api/dashboard?boardOrd=${boardOrd}&destOrd=${destOrd}&_=${nonce}`, {
+    const res = await fetch(`/api/dashboard?boardOrd=${boardOrd}&destOrd=${destOrd}&_=${Date.now()}`, {
       cache: 'no-store',
       signal: dashboardController.signal,
       headers: { 'Cache-Control': 'no-cache' }
     });
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error || '실시간 정보를 불러오지 못했습니다.');
+    if (!res.ok) throw new Error(data.error || `실시간 API HTTP ${res.status}`);
     if (requestId !== dashboardRequestId) return;
     render(data);
     $('refreshStatus').textContent = `${new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })} 갱신 완료`;
   } catch (err) {
     if (err.name === 'AbortError' || requestId !== dashboardRequestId) return;
-    $('recommendationTitle').textContent = '데이터 연결 확인 필요';
+    $('recommendationTitle').textContent = '실시간 API 연결 확인 필요';
     $('recommendationReason').textContent = err.message;
-    $('refreshStatus').textContent = '갱신 실패 · 다시 눌러봐';
+    $('refreshStatus').textContent = 'API 연결 실패';
   } finally {
     if (requestId === dashboardRequestId) setBusy(false);
   }
@@ -279,7 +306,13 @@ function renderAiAdvice(payload) {
 }
 
 async function loadAiAdvice() {
-  if (!currentDashboard) return;
+  if (!currentDashboard) {
+    $('aiEmpty').hidden = false;
+    $('aiResult').hidden = true;
+    $('aiEmpty').textContent = '먼저 실시간 버스 데이터를 불러와야 AI 분석을 사용할 수 있어';
+    return;
+  }
+
   const button = $('aiAdviceButton');
   button.disabled = true;
   button.textContent = '분석 중';
@@ -298,29 +331,67 @@ async function loadAiAdvice() {
     $('aiEmpty').textContent = `AI 분석 오류: ${err.message}`;
   } finally {
     button.disabled = false;
-    button.textContent = 'AI 분석';
+    button.textContent = 'Gemini 분석';
   }
 }
 
+async function loadFallbackBootstrap(apiError) {
+  const res = await fetch(`/7016-schoolbound-stops.json?_=${Date.now()}`, { cache: 'no-store' });
+  if (!res.ok) throw new Error('정류장 fallback 파일도 불러오지 못했습니다.');
+  const stations = await res.json();
+  const destination = stations.find((s) => /상명대정문/.test(s.stationNm)) || stations.at(-1);
+  const suggested = stations.find((s) => /경복궁역3번출구/.test(s.stationNm)) || stations[Math.max(0, stations.length - 8)];
+
+  return {
+    mode: 'fallback',
+    stations,
+    stopCount: stations.length,
+    suggestedBoardingSeq: suggested?.seq,
+    destinationSeq: destination?.seq,
+    geminiConfigured: false,
+    apiError
+  };
+}
+
 async function init() {
-  setBusy(true);
+  clearInterval(timer);
+  setBusy(true, '노선 정보 불러오는 중…');
+  currentDashboard = null;
+
   try {
-    const res = await fetch(`/api/bootstrap?_=${Date.now()}`, { cache: 'no-store' });
-    bootstrap = await res.json();
-    if (!res.ok) throw new Error(bootstrap.error || '노선 정보를 불러오지 못했습니다.');
-    $('modeBadge').className = bootstrap.mode === 'live' ? 'status-chip live' : 'status-chip';
-    $('modeBadge').textContent = bootstrap.mode === 'live' ? 'LIVE' : 'DEMO';
-    if (!bootstrap.geminiConfigured) $('aiEmpty').textContent = 'Gemini API 키가 없어 규칙 기반 추천만 사용합니다';
-    populateStations();
+    let apiError = null;
+    try {
+      const res = await fetch(`/api/bootstrap?_=${Date.now()}`, { cache: 'no-store' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `서울 버스 API HTTP ${res.status}`);
+      bootstrap = data;
+    } catch (err) {
+      apiError = err.message;
+      bootstrap = await loadFallbackBootstrap(apiError);
+    }
+
+    setModeBadge(bootstrap.mode);
+    const populated = populateStations();
+    if (!populated) throw new Error('정류장 목록이 비어 있습니다.');
+
+    if (bootstrap.mode === 'fallback') {
+      $('recommendationTitle').textContent = '정류장 목록은 정상적으로 불러왔어';
+      $('recommendationReason').textContent = `실시간 서울 버스 API는 연결 확인이 필요해 · ${bootstrap.apiError}`;
+      $('refreshStatus').textContent = '정류장 목록 fallback 사용 중';
+      return;
+    }
+
+    if (!bootstrap.geminiConfigured) {
+      $('aiEmpty').textContent = 'Gemini API 키를 넣으면 현재 배차와 혼잡도를 추가 분석할 수 있어';
+    }
+
     await loadDashboard({ manual: false });
-    clearInterval(timer);
     timer = setInterval(() => loadDashboard({ manual: false }), 30000);
   } catch (err) {
-    $('modeBadge').className = 'status-chip error';
-    $('modeBadge').textContent = 'ERROR';
-    $('boardingPickerText').textContent = '정류장 로드 실패';
+    setModeBadge('error', 'ERROR');
     $('recommendationTitle').textContent = '초기화 실패';
     $('recommendationReason').textContent = err.message;
+    $('boardingPickerText').textContent = '정류장 로드 실패';
   } finally {
     setBusy(false);
   }
@@ -330,18 +401,20 @@ $('boardingPickerButton').addEventListener('click', (event) => {
   event.stopPropagation();
   setPickerOpen($('boardingPickerMenu').hidden);
 });
+$('boardingPickerMenu').addEventListener('click', (event) => event.stopPropagation());
 $('boardingSearch').addEventListener('input', (event) => renderBoardingOptions(event.target.value));
-$('boardingSearch').addEventListener('keydown', (event) => {
-  if (event.key === 'Escape') {
-    setPickerOpen(false);
-    $('boardingPickerButton').focus();
-  }
+document.addEventListener('click', () => setPickerOpen(false));
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') setPickerOpen(false);
 });
-document.addEventListener('click', (event) => {
-  const picker = $('boardingPickerButton').closest('.picker-field');
-  if (!picker.contains(event.target)) setPickerOpen(false);
-});
+
 $('aiAdviceButton').addEventListener('click', loadAiAdvice);
-$('refreshButton').addEventListener('click', () => loadDashboard({ manual: true }));
-document.addEventListener('visibilitychange', () => { if (!document.hidden) loadDashboard({ manual: false }); });
+$('refreshButton').addEventListener('click', () => {
+  if (bootstrap?.mode === 'fallback') init();
+  else loadDashboard({ manual: true });
+});
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && bootstrap?.mode !== 'fallback') loadDashboard({ manual: false });
+});
+
 init();
