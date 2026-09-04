@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="theme-color" content="#f4f6f4" />
   <title>7016 · 상명대 통학</title>
-  <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="/styles.css?v=5.0" />
 </head>
 <body>
   <main class="shell">
@@ -38,8 +38,8 @@
       </label>
       <div class="route-arrow" aria-hidden="true">→</div>
       <label class="control-field">
-        <span>목적지</span>
-        <select id="destinationSelect" aria-label="목적지 선택"></select>
+        <span>목적지 · 상명대 고정</span>
+        <select id="destinationSelect" aria-label="목적지 상명대정문" disabled></select>
       </label>
       <div class="refresh-wrap">
         <button id="refreshButton" type="button" aria-live="polite">새로고침</button>
@@ -199,6 +199,6 @@
       <span>서울시 버스 Open API · 월간 교통카드 승하차 데이터</span>
     </footer>
   </main>
-  <script type="module" src="/app.js"></script>
+  <script type="module" src="/app.js?v=5.0"></script>
 </body>
 </html>
