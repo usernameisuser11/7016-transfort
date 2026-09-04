@@ -3,66 +3,57 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="theme-color" content="#08140d" />
+  <meta name="theme-color" content="#f4f6f4" />
   <title>7016 · 상명대 통학</title>
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
   <main class="shell">
     <header class="topbar">
-      <div>
-        <div class="eyebrow">SMU COMMUTE</div>
-        <h1><span>7016</span> 상명대 통학</h1>
+      <div class="brand">
+        <div class="brand-mark">7016</div>
+        <div>
+          <div class="eyebrow">상명대 통학 정보</div>
+          <h1>7016 버스</h1>
+        </div>
       </div>
-      <div class="top-badges"><div id="stopCountBadge" class="mode-badge">정류장 -</div><div id="modeBadge" class="mode-badge">연결 중</div></div>
+      <div class="top-badges">
+        <div id="stopCountBadge" class="mode-badge">정류장 -</div>
+        <div id="modeBadge" class="mode-badge live">연결 중</div>
+      </div>
     </header>
 
-    <section class="hero panel">
-      <div class="hero-copy">
-        <p class="hero-kicker">지금 탈까, 다음 차 탈까?</p>
-        <h2 id="recommendationTitle">실시간 정보를 불러오는 중</h2>
-        <p id="recommendationReason" class="muted">7016의 도착·배차·혼잡도를 비교합니다</p>
+    <section class="route-summary">
+      <div>
+        <span class="route-summary-label">학교 방향</span>
+        <strong>은평공영차고지 → 상명대정문</strong>
       </div>
-      <div id="recommendationIcon" class="recommendation-icon">7016</div>
-    </section>
-
-
-    <section class="ai-panel panel">
-      <div class="ai-head">
-        <div>
-          <div class="eyebrow">GEMINI COMMUTE AI</div>
-          <h3>AI 통학 판단</h3>
-        </div>
-        <button id="aiAdviceButton" class="ai-button" type="button">Gemini 분석</button>
-      </div>
-      <div id="aiEmpty" class="ai-empty">
-        실시간 배차와 혼잡도를 불러온 뒤 Gemini가 지금 탈지 다음 차를 기다릴지 한 번 더 분석해줘
-      </div>
-      <div id="aiResult" class="ai-result" hidden>
-        <div class="ai-decision-row">
-          <span id="aiDecisionBadge" class="ai-decision neutral">AI</span>
-          <strong id="aiHeadline">-</strong>
-        </div>
-        <p id="aiReason">-</p>
-        <div class="ai-notes">
-          <div><span>주의</span><p id="aiRisk">-</p></div>
-          <div><span>팁</span><p id="aiTip">-</p></div>
-        </div>
-        <div id="aiModel" class="muted small"></div>
-      </div>
+      <span class="route-summary-note">실시간 도착 · 배차 · 혼잡도</span>
     </section>
 
     <section class="controls panel">
-      <label>
+      <label class="control-field">
         <span>승차 정류장</span>
-        <select id="boardingSelect"></select>
+        <select id="boardingSelect" aria-label="승차 정류장 선택"></select>
       </label>
-      <div class="arrow">→</div>
-      <label>
+      <div class="route-arrow" aria-hidden="true">→</div>
+      <label class="control-field">
         <span>목적지</span>
-        <select id="destinationSelect"></select>
+        <select id="destinationSelect" aria-label="목적지 선택"></select>
       </label>
-      <div class="refresh-wrap"><button id="refreshButton" type="button" aria-live="polite">새로고침</button><span id="refreshStatus" class="refresh-status" aria-live="polite">자동 갱신 30초</span></div>
+      <div class="refresh-wrap">
+        <button id="refreshButton" type="button" aria-live="polite">새로고침</button>
+        <span id="refreshStatus" class="refresh-status" aria-live="polite">자동 갱신 30초</span>
+      </div>
+    </section>
+
+    <section class="recommendation panel">
+      <div class="recommendation-copy">
+        <span class="section-tag">지금 판단</span>
+        <h2 id="recommendationTitle">실시간 정보를 불러오는 중</h2>
+        <p id="recommendationReason">7016의 도착·배차·혼잡도를 비교합니다</p>
+      </div>
+      <div id="recommendationIcon" class="recommendation-icon">7016</div>
     </section>
 
     <section class="metrics">
@@ -88,12 +79,19 @@
       </article>
     </section>
 
+    <section class="section-head">
+      <div>
+        <span class="section-tag">도착 정보</span>
+        <h2>어느 버스를 탈까</h2>
+      </div>
+    </section>
+
     <section class="bus-grid">
       <article class="bus-card panel" id="busCard1">
         <div class="bus-card-head">
           <div>
-            <span class="pill">첫 번째</span>
-            <h3>이번 버스</h3>
+            <span class="pill">이번 버스</span>
+            <h3>첫 번째 도착</h3>
           </div>
           <span id="congestion1" class="congestion unknown">정보 없음</span>
         </div>
@@ -111,8 +109,8 @@
       <article class="bus-card panel" id="busCard2">
         <div class="bus-card-head">
           <div>
-            <span class="pill secondary">두 번째</span>
-            <h3>다음 버스</h3>
+            <span class="pill secondary">다음 버스</span>
+            <h3>두 번째 도착</h3>
           </div>
           <span id="congestion2" class="congestion unknown">정보 없음</span>
         </div>
@@ -128,31 +126,10 @@
       </article>
     </section>
 
-
-    <section class="passenger panel">
-      <div class="section-title">
-        <div>
-          <div class="eyebrow">HISTORICAL DEMAND</div>
-          <h3>이 시간대 승하차 패턴</h3>
-        </div>
-        <div id="passengerSource" class="muted small">승하차 데이터 확인 중</div>
-      </div>
-      <div class="passenger-summary">
-        <div><span>시간대</span><strong id="histHour">-</strong></div>
-        <div><span>평균 승차</span><strong id="histBoard">-</strong></div>
-        <div><span>평균 하차</span><strong id="histAlight">-</strong></div>
-        <div><span>수요 강도</span><strong id="histLevel">-</strong></div>
-      </div>
-      <div id="hourlyBars" class="hourly-bars" aria-label="시간대별 승차 수요"></div>
-      <p id="histNote" class="muted small footnote">
-        서울시 월간 교통카드 승하차 데이터를 넣으면 선택 정류장의 시간대별 패턴을 계산합니다
-      </p>
-    </section>
-
     <section class="route panel">
       <div class="section-title">
         <div>
-          <div class="eyebrow">ROUTE SNAPSHOT</div>
+          <span class="section-tag">노선 위치</span>
           <h3>학교 방향 진행 상황</h3>
         </div>
         <div id="updatedAt" class="muted small">-</div>
@@ -167,14 +144,59 @@
         <div id="busMarker2" class="bus-marker b2">2</div>
       </div>
       <p class="muted small footnote">
-        상명대 도착 ETA는 같은 차량 ID가 목적지 도착정보에서도 확인되면 실시간 값으로 계산하고
-        그렇지 않으면 현재 노선 구간 소요시간을 이용해 보수적으로 추정합니다
+        동일 차량의 목적지 도착정보가 확인되면 실시간 값을 사용하고, 그렇지 않으면 현재 노선 구간 소요시간으로 추정합니다.
       </p>
     </section>
 
+    <section class="passenger panel">
+      <div class="section-title">
+        <div>
+          <span class="section-tag">월간 승하차 데이터</span>
+          <h3>이 시간대 이용 패턴</h3>
+        </div>
+        <div id="passengerSource" class="muted small">승하차 데이터 확인 중</div>
+      </div>
+      <div class="passenger-summary">
+        <div><span>시간대</span><strong id="histHour">-</strong></div>
+        <div><span>평균 승차</span><strong id="histBoard">-</strong></div>
+        <div><span>평균 하차</span><strong id="histAlight">-</strong></div>
+        <div><span>수요 강도</span><strong id="histLevel">-</strong></div>
+      </div>
+      <div id="hourlyBars" class="hourly-bars" aria-label="시간대별 승차 수요"></div>
+      <p id="histNote" class="muted small footnote">
+        선택 정류장의 시간대별 승하차 패턴을 계산합니다.
+      </p>
+    </section>
+
+    <section class="ai-panel panel">
+      <div class="ai-head">
+        <div>
+          <span class="section-tag">보조 기능</span>
+          <h3>AI 통학 판단</h3>
+          <p class="muted">실시간 정보가 애매할 때만 추가로 참고해.</p>
+        </div>
+        <button id="aiAdviceButton" class="ai-button" type="button">AI 분석</button>
+      </div>
+      <div id="aiEmpty" class="ai-empty">
+        현재 배차·혼잡도·시간대 수요를 바탕으로 이번 차와 다음 차를 비교합니다.
+      </div>
+      <div id="aiResult" class="ai-result" hidden>
+        <div class="ai-decision-row">
+          <span id="aiDecisionBadge" class="ai-decision neutral">AI</span>
+          <strong id="aiHeadline">-</strong>
+        </div>
+        <p id="aiReason">-</p>
+        <div class="ai-notes">
+          <div><span>주의</span><p id="aiRisk">-</p></div>
+          <div><span>팁</span><p id="aiTip">-</p></div>
+        </div>
+        <div id="aiModel" class="muted small"></div>
+      </div>
+    </section>
+
     <footer>
-      <span>7016 Campus Bus MVP</span>
-      <span>서울시 버스 Open API 기반</span>
+      <span>7016 상명대 통학 정보</span>
+      <span>서울시 버스 Open API · 월간 교통카드 승하차 데이터</span>
     </footer>
   </main>
   <script type="module" src="/app.js"></script>
