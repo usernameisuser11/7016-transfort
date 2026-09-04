@@ -1,0 +1,52 @@
+/* Keep the custom boarding-stop picker in document flow so it never covers cards below. */
+.controls{
+  align-items:start;
+}
+.picker-field{
+  position:relative;
+  min-width:0;
+}
+.picker-menu{
+  position:static;
+  left:auto;
+  right:auto;
+  top:auto;
+  z-index:auto;
+  width:100%;
+  margin-top:8px;
+  max-height:none;
+  box-shadow:0 14px 34px rgba(0,0,0,.28);
+}
+.picker-options{
+  max-height:300px;
+  overflow-y:auto;
+  overscroll-behavior:contain;
+}
+.route-arrow{
+  align-self:start;
+  padding-top:44px;
+  padding-bottom:0;
+}
+.fixed-field,
+.refresh-wrap{
+  align-self:start;
+}
+.refresh-wrap{
+  margin-top:23px;
+}
+
+@media(max-width:850px){
+  .route-arrow{display:none}
+  .refresh-wrap{margin-top:0}
+}
+
+@media(max-width:620px){
+  .picker-menu{
+    position:static;
+    left:auto;
+    right:auto;
+    top:auto;
+    max-height:none;
+  }
+  .picker-options{max-height:280px}
+}
