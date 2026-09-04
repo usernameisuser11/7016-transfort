@@ -70,6 +70,9 @@ function clearRealtimeData() {
     badge.textContent = '정보 없음';
     $('busMarker' + idx).style.display = 'none';
   }
+
+  const routeSummary = $('routePositionSummary');
+  if (routeSummary) routeSummary.textContent = '실시간 차량 위치를 기다리는 중입니다';
 }
 
 function setPickerOpen(open) {
@@ -195,17 +198,43 @@ function renderMarkers(data) {
   const boardOrd = Number(data?.boarding?.ord);
   const destOrd = Number(data?.destination?.ord);
   const span = Math.max(1, destOrd - boardOrd);
+  const statuses = [];
 
   [1, 2].forEach((n) => { $('busMarker' + n).style.display = 'none'; });
   (data.buses || []).slice(0, 2).forEach((bus, i) => {
     const marker = $('busMarker' + (i + 1));
     const ord = Number(bus?.sectionOrd);
-    // 이 선은 승차 정류장→상명대 구간만 표현하므로 승차 전 차량은 표시하지 않는다.
-    if (!Number.isFinite(ord) || ord < boardOrd || ord > destOrd) return;
+    const label = i === 0 ? '첫 버스' : '다음 버스';
+    const etaText = bus?.etaSec != null ? ` · 약 ${formatMinutes(bus.etaSec)}` : '';
+
+    if (!Number.isFinite(ord)) {
+      statuses.push(`${label} 위치 확인 중${etaText}`);
+      return;
+    }
+
+    if (ord < boardOrd) {
+      const stopsAway = Math.max(1, Math.round(boardOrd - ord));
+      statuses.push(`${label} ${stopsAway}정류장 전${etaText}`);
+      return;
+    }
+
+    if (ord > destOrd) {
+      statuses.push(`${label} 상명대 통과`);
+      return;
+    }
+
     marker.style.display = 'grid';
     const progress = Math.max(0, Math.min(1, (ord - boardOrd) / span));
     marker.style.left = `${progress * 100}%`;
+    statuses.push(ord === boardOrd ? `${label} 승차 정류장 구간${etaText}` : `${label} 상명대 방향 운행 중`);
   });
+
+  const routeSummary = $('routePositionSummary');
+  if (routeSummary) {
+    routeSummary.textContent = statuses.length
+      ? statuses.join(' / ')
+      : '실시간 차량 위치를 확인할 수 없습니다';
+  }
 }
 
 function demandLabel(level) {
