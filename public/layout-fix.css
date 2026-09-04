@@ -1,36 +1,61 @@
-/* Keep the custom boarding-stop picker in document flow so it never covers cards below. */
+/* Keep the custom boarding-stop picker in normal document flow so it never covers the cards below. */
 .controls{
   align-items:start;
+  overflow:visible;
 }
+
 .picker-field{
   position:relative;
   min-width:0;
 }
+
 .picker-menu{
-  position:static;
-  left:auto;
-  right:auto;
-  top:auto;
-  z-index:auto;
+  position:static !important;
+  inset:auto !important;
+  z-index:auto !important;
   width:100%;
   margin-top:8px;
-  max-height:none;
+  max-height:none !important;
+  overflow:hidden;
   box-shadow:0 14px 34px rgba(0,0,0,.28);
 }
+
+.picker-search-wrap{
+  position:sticky;
+  top:0;
+  z-index:1;
+  background:#09130d;
+}
+
 .picker-options{
-  max-height:300px;
+  max-height:300px !important;
   overflow-y:auto;
   overscroll-behavior:contain;
+  scrollbar-gutter:stable;
 }
+
+.picker-option-name{
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+
+.picker-option-meta{
+  flex:0 0 auto;
+}
+
 .route-arrow{
   align-self:start;
   padding-top:44px;
   padding-bottom:0;
 }
+
 .fixed-field,
 .refresh-wrap{
   align-self:start;
 }
+
 .refresh-wrap{
   margin-top:23px;
 }
@@ -38,15 +63,22 @@
 @media(max-width:850px){
   .route-arrow{display:none}
   .refresh-wrap{margin-top:0}
+  .picker-options{max-height:280px !important}
 }
 
 @media(max-width:620px){
   .picker-menu{
-    position:static;
-    left:auto;
-    right:auto;
-    top:auto;
-    max-height:none;
+    position:static !important;
+    inset:auto !important;
+    max-height:none !important;
   }
-  .picker-options{max-height:280px}
+  .picker-options{max-height:260px !important}
+  .picker-option{
+    align-items:flex-start;
+  }
+  .picker-option-name{
+    white-space:normal;
+    overflow:visible;
+    text-overflow:clip;
+  }
 }
