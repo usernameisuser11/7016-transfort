@@ -3,9 +3,9 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="theme-color" content="#f5f7f5" />
+  <meta name="theme-color" content="#07100b" />
   <title>7016 · 상명대 통학</title>
-  <link rel="stylesheet" href="/styles.css?v=6.0" />
+  <link rel="stylesheet" href="/styles.css?v=7.0" />
 </head>
 <body>
   <main class="shell">
@@ -13,8 +13,8 @@
       <div class="brand">
         <div class="route-badge">7016</div>
         <div>
-          <p class="overline">상명대 통학</p>
-          <h1>7016 버스</h1>
+          <p class="overline">SMU COMMUTE</p>
+          <h1>7016 상명대 통학</h1>
         </div>
       </div>
       <div class="status-row">
@@ -22,6 +22,15 @@
         <span id="modeBadge" class="status-chip live">연결 중</span>
       </div>
     </header>
+
+    <section class="hero panel recommendation" aria-live="polite">
+      <div>
+        <span class="section-label">지금 탈까, 다음 차 탈까?</span>
+        <h2 id="recommendationTitle">실시간 정보를 불러오는 중</h2>
+        <p id="recommendationReason">7016의 도착시간과 혼잡도를 비교합니다</p>
+      </div>
+      <span id="recommendationIcon" class="recommendation-action">7016</span>
+    </section>
 
     <section class="controls panel" aria-label="통학 경로 설정">
       <div class="picker-field">
@@ -32,7 +41,7 @@
         </button>
         <div id="boardingPickerMenu" class="picker-menu" hidden>
           <div class="picker-search-wrap">
-            <input id="boardingSearch" class="picker-search" type="search" placeholder="정류장명 또는 번호 검색" autocomplete="off" />
+            <input id="boardingSearch" class="picker-search" type="search" placeholder="정류장명 또는 ARS 번호 검색" autocomplete="off" />
           </div>
           <div id="boardingOptions" class="picker-options" role="listbox" aria-label="승차 정류장 목록"></div>
         </div>
@@ -57,63 +66,44 @@
       </div>
     </section>
 
-    <section class="recommendation" aria-live="polite">
-      <div>
-        <span class="section-label">추천</span>
-        <h2 id="recommendationTitle">실시간 정보를 불러오는 중</h2>
-        <p id="recommendationReason">도착시간과 혼잡도를 비교합니다</p>
-      </div>
-      <span id="recommendationIcon" class="recommendation-action">7016</span>
+    <section class="metrics-panel" aria-label="운행 요약">
+      <div class="metric panel"><span>다음 버스</span><strong id="nextBusEta">-</strong><small id="nextBusMessage">도착 정보</small></div>
+      <div class="metric panel"><span>실제 배차</span><strong id="actualHeadway">-</strong><small id="scheduledHeadway">공식 배차 -</small></div>
+      <div class="metric panel"><span>상명대 도착</span><strong id="schoolEta">-</strong><small id="rideTime">예상 이동시간 -</small></div>
+      <div class="metric panel"><span>운행 차량</span><strong id="runningCount">-</strong><small>현재 7016 노선</small></div>
     </section>
 
-    <section class="arrival-section">
-      <div class="section-heading">
-        <div>
-          <span class="section-label">실시간 도착</span>
-          <h2>이번 버스와 다음 버스</h2>
+    <section class="bus-grid">
+      <article class="bus-card panel primary" id="busCard1">
+        <div class="bus-card-head">
+          <div><span class="bus-order">첫 번째</span><h3>이번 버스</h3></div>
+          <span id="congestion1" class="congestion unknown">정보 없음</span>
         </div>
-        <span id="updatedAt" class="muted small">-</span>
-      </div>
+        <div class="bus-main"><strong id="busEta1">-</strong><span id="busArrMsg1">도착정보 없음</span></div>
+        <div class="bus-meta">
+          <span>차량 <strong id="busNo1">-</strong></span>
+          <span>상명대 <strong id="busSchool1">-</strong></span>
+          <span>저상 <strong id="lowFloor1">-</strong></span>
+        </div>
+      </article>
 
-      <div class="bus-grid">
-        <article class="bus-card primary" id="busCard1">
-          <div class="bus-card-head">
-            <div><span class="bus-order">이번 버스</span><h3>첫 번째 도착</h3></div>
-            <span id="congestion1" class="congestion unknown">정보 없음</span>
-          </div>
-          <div class="bus-main"><strong id="busEta1">-</strong><span id="busArrMsg1">도착정보 없음</span></div>
-          <div class="bus-meta">
-            <span>차량 <strong id="busNo1">-</strong></span>
-            <span>상명대 <strong id="busSchool1">-</strong></span>
-            <span>저상 <strong id="lowFloor1">-</strong></span>
-          </div>
-        </article>
-
-        <article class="bus-card" id="busCard2">
-          <div class="bus-card-head">
-            <div><span class="bus-order secondary">다음 버스</span><h3>두 번째 도착</h3></div>
-            <span id="congestion2" class="congestion unknown">정보 없음</span>
-          </div>
-          <div class="bus-main"><strong id="busEta2">-</strong><span id="busArrMsg2">도착정보 없음</span></div>
-          <div class="bus-meta">
-            <span>차량 <strong id="busNo2">-</strong></span>
-            <span>상명대 <strong id="busSchool2">-</strong></span>
-            <span>저상 <strong id="lowFloor2">-</strong></span>
-          </div>
-        </article>
-      </div>
-    </section>
-
-    <section class="metrics-panel panel" aria-label="운행 요약">
-      <div class="metric"><span>다음 버스</span><strong id="nextBusEta">-</strong><small id="nextBusMessage">도착 정보</small></div>
-      <div class="metric"><span>실제 배차</span><strong id="actualHeadway">-</strong><small id="scheduledHeadway">공식 배차 -</small></div>
-      <div class="metric"><span>상명대 도착</span><strong id="schoolEta">-</strong><small id="rideTime">예상 이동시간 -</small></div>
-      <div class="metric"><span>운행 차량</span><strong id="runningCount">-</strong><small>현재 7016 노선</small></div>
+      <article class="bus-card panel" id="busCard2">
+        <div class="bus-card-head">
+          <div><span class="bus-order secondary">두 번째</span><h3>다음 버스</h3></div>
+          <span id="congestion2" class="congestion unknown">정보 없음</span>
+        </div>
+        <div class="bus-main"><strong id="busEta2">-</strong><span id="busArrMsg2">도착정보 없음</span></div>
+        <div class="bus-meta">
+          <span>차량 <strong id="busNo2">-</strong></span>
+          <span>상명대 <strong id="busSchool2">-</strong></span>
+          <span>저상 <strong id="lowFloor2">-</strong></span>
+        </div>
+      </article>
     </section>
 
     <section class="details-stack">
       <details class="detail-panel panel">
-        <summary><span>노선 위치</span><small>학교 방향 진행 상황</small></summary>
+        <summary><span>노선 위치</span><small id="updatedAt">-</small></summary>
         <div class="detail-body">
           <div class="route-line">
             <div class="route-track"></div>
@@ -124,7 +114,7 @@
             <div id="busMarker1" class="bus-marker b1">1</div>
             <div id="busMarker2" class="bus-marker b2">2</div>
           </div>
-          <p class="muted small footnote">동일 차량의 목적지 도착정보가 없으면 현재 구간 소요시간으로 추정합니다</p>
+          <p class="muted small footnote">실시간 목적지 정보가 없으면 현재 구간 소요시간으로 보수적으로 추정합니다</p>
         </div>
       </details>
 
@@ -147,7 +137,7 @@
         <div class="detail-body ai-body">
           <div class="ai-head">
             <p class="muted">현재 배차·혼잡도·시간대 수요를 한 번 더 비교합니다</p>
-            <button id="aiAdviceButton" class="ai-button" type="button">AI 분석</button>
+            <button id="aiAdviceButton" class="ai-button" type="button">Gemini 분석</button>
           </div>
           <div id="aiEmpty" class="ai-empty">실시간 데이터가 애매할 때 보조로 사용해</div>
           <div id="aiResult" class="ai-result" hidden>
@@ -160,8 +150,8 @@
       </details>
     </section>
 
-    <footer><span>7016 상명대 통학 정보</span><span>서울시 버스 Open API · 월간 교통카드 승하차 데이터</span></footer>
+    <footer><span>7016 Campus Bus</span><span>서울시 버스 Open API · 월간 교통카드 승하차 데이터</span></footer>
   </main>
-  <script type="module" src="/app.js?v=6.0"></script>
+  <script type="module" src="/app.js?v=7.0"></script>
 </body>
 </html>
