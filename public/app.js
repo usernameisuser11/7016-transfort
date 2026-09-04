@@ -33,7 +33,7 @@ function stationLabel(s) {
 
 function setBusy(v, status = '') {
   const button = $('refreshButton');
-  button.disabled = false;
+  button.disabled = Boolean(v);
   button.classList.toggle('is-loading', Boolean(v));
   button.setAttribute('aria-busy', v ? 'true' : 'false');
   button.textContent = v ? '갱신 중' : '새로고침';
@@ -200,7 +200,8 @@ function renderMarkers(data) {
   (data.buses || []).slice(0, 2).forEach((bus, i) => {
     const marker = $('busMarker' + (i + 1));
     const ord = Number(bus?.sectionOrd);
-    if (!Number.isFinite(ord)) return;
+    // 이 선은 승차 정류장→상명대 구간만 표현하므로 승차 전 차량은 표시하지 않는다.
+    if (!Number.isFinite(ord) || ord < boardOrd || ord > destOrd) return;
     marker.style.display = 'grid';
     const progress = Math.max(0, Math.min(1, (ord - boardOrd) / span));
     marker.style.left = `${progress * 100}%`;
@@ -232,7 +233,7 @@ function renderHistorical(h) {
   const sourceMonth = formatSourceMonth(h.sourceMonth || '월간 데이터');
   $('passengerSource').textContent = `${sourceMonth}${h.valueBasis === 'daily-average' ? ' · 시간대 일평균' : ''}${h.demo ? ' · DEMO' : ''}`;
   $('histNote').textContent = h.ambiguousName
-    ? '같은 이름의 양방향 정류장을 합산한 일평균 참고값입니다'
+    ? '정류장 ID를 매칭하지 못해 같은 이름의 양방향 정류장을 합산한 일평균 참고값입니다'
     : '해당 월의 시간대별 일평균 교통카드 승하차 패턴입니다';
 
   const max = Math.max(1, ...(h.hours || []).map((x) => Number(x.board || 0)));
@@ -240,7 +241,7 @@ function renderHistorical(h) {
     const bar = document.createElement('div');
     bar.className = 'hour-bar' + (x.hour === h.hour ? ' current' : '');
     bar.style.height = `${Math.max(3, Math.round(Number(x.board || 0) / max * 100))}%`;
-    bar.dataset.label = `${String(x.hour).padStart(2, '0')}시 ${Number(x.board || 0).toFixed(1)}명`;
+    bar.dataset.label = `${String(x.hour).padStart(2, '0')}시 일평균 ${Number(x.board || 0).toFixed(1)}명`;
     bars.appendChild(bar);
   });
 }
