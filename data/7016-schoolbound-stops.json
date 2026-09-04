@@ -1,0 +1,326 @@
+[
+  {
+    "seq": 1,
+    "station": "fallback-35331",
+    "stationNm": "은평공영차고지",
+    "arsId": "35331"
+  },
+  {
+    "seq": 2,
+    "station": "fallback-12315",
+    "stationNm": "덕은교.은평차고지앞",
+    "arsId": "12315"
+  },
+  {
+    "seq": 3,
+    "station": "fallback-14112",
+    "stationNm": "DMC첨단산업센터",
+    "arsId": "14112"
+  },
+  {
+    "seq": 4,
+    "station": "fallback-14272",
+    "stationNm": "월드컵파크7단지",
+    "arsId": "14272"
+  },
+  {
+    "seq": 5,
+    "station": "fallback-14110",
+    "stationNm": "서부면허시험장",
+    "arsId": "14110"
+  },
+  {
+    "seq": 6,
+    "station": "fallback-14116",
+    "stationNm": "월드컵파크3단지정문",
+    "arsId": "14116"
+  },
+  {
+    "seq": 7,
+    "station": "fallback-14117",
+    "stationNm": "월드컵파크2단지.에스플렉스센터",
+    "arsId": "14117"
+  },
+  {
+    "seq": 8,
+    "station": "fallback-14166",
+    "stationNm": "상암초등학교",
+    "arsId": "14166"
+  },
+  {
+    "seq": 9,
+    "station": "fallback-14165",
+    "stationNm": "DMC상암센트럴파크",
+    "arsId": "14165"
+  },
+  {
+    "seq": 10,
+    "station": "fallback-14273",
+    "stationNm": "월드컵경기장북측",
+    "arsId": "14273"
+  },
+  {
+    "seq": 11,
+    "station": "fallback-14163",
+    "stationNm": "성산아파트",
+    "arsId": "14163"
+  },
+  {
+    "seq": 12,
+    "station": "fallback-14161",
+    "stationNm": "성산119안전센터",
+    "arsId": "14161"
+  },
+  {
+    "seq": 13,
+    "station": "fallback-14158",
+    "stationNm": "성산2동주민센터",
+    "arsId": "14158"
+  },
+  {
+    "seq": 14,
+    "station": "fallback-14157",
+    "stationNm": "중동초등학교",
+    "arsId": "14157"
+  },
+  {
+    "seq": 15,
+    "station": "fallback-14185",
+    "stationNm": "성산2교",
+    "arsId": "14185"
+  },
+  {
+    "seq": 16,
+    "station": "fallback-14188",
+    "stationNm": "성미약수터",
+    "arsId": "14188"
+  },
+  {
+    "seq": 17,
+    "station": "fallback-14190",
+    "stationNm": "경성중고.홍대부속여중고입구",
+    "arsId": "14190"
+  },
+  {
+    "seq": 18,
+    "station": "fallback-14193",
+    "stationNm": "서울도시가스마포사옥",
+    "arsId": "14193"
+  },
+  {
+    "seq": 19,
+    "station": "fallback-14181",
+    "stationNm": "서서울농협홍대역점",
+    "arsId": "14181"
+  },
+  {
+    "seq": 20,
+    "station": "fallback-14015",
+    "stationNm": "홍대입구역",
+    "arsId": "14015"
+  },
+  {
+    "seq": 21,
+    "station": "fallback-14061",
+    "stationNm": "동교동삼거리",
+    "arsId": "14061"
+  },
+  {
+    "seq": 22,
+    "station": "fallback-14228",
+    "stationNm": "신촌역",
+    "arsId": "14228"
+  },
+  {
+    "seq": 23,
+    "station": "fallback-14168",
+    "stationNm": "신촌로터리",
+    "arsId": "14168"
+  },
+  {
+    "seq": 24,
+    "station": "fallback-14171",
+    "stationNm": "서강대학교",
+    "arsId": "14171"
+  },
+  {
+    "seq": 25,
+    "station": "fallback-14172",
+    "stationNm": "광성중고등학교",
+    "arsId": "14172"
+  },
+  {
+    "seq": 26,
+    "station": "fallback-14174",
+    "stationNm": "대흥역",
+    "arsId": "14174"
+  },
+  {
+    "seq": 27,
+    "station": "fallback-14176",
+    "stationNm": "용강초등학교",
+    "arsId": "14176"
+  },
+  {
+    "seq": 28,
+    "station": "fallback-14178",
+    "stationNm": "동도중학교.서울디자인고등학교",
+    "arsId": "14178"
+  },
+  {
+    "seq": 29,
+    "station": "fallback-14180",
+    "stationNm": "공덕역1번출구",
+    "arsId": "14180"
+  },
+  {
+    "seq": 30,
+    "station": "fallback-14132",
+    "stationNm": "마포역",
+    "arsId": "14132"
+  },
+  {
+    "seq": 31,
+    "station": "fallback-03298",
+    "stationNm": "청암동강변삼성아파트",
+    "arsId": "03298"
+  },
+  {
+    "seq": 32,
+    "station": "fallback-03299",
+    "stationNm": "원효2동산호아파트",
+    "arsId": "03299"
+  },
+  {
+    "seq": 33,
+    "station": "fallback-03301",
+    "stationNm": "원효로풍전아파트",
+    "arsId": "03301"
+  },
+  {
+    "seq": 34,
+    "station": "fallback-03147",
+    "stationNm": "원효로3가",
+    "arsId": "03147"
+  },
+  {
+    "seq": 35,
+    "station": "fallback-03145",
+    "stationNm": "원효로2가사거리",
+    "arsId": "03145"
+  },
+  {
+    "seq": 36,
+    "station": "fallback-03143",
+    "stationNm": "남정초등학교",
+    "arsId": "03143"
+  },
+  {
+    "seq": 37,
+    "station": "fallback-03142",
+    "stationNm": "용산e편한세상",
+    "arsId": "03142"
+  },
+  {
+    "seq": 38,
+    "station": "fallback-03346",
+    "stationNm": "용산꿈나무종합타운",
+    "arsId": "03346"
+  },
+  {
+    "seq": 39,
+    "station": "fallback-03140",
+    "stationNm": "용산경찰서",
+    "arsId": "03140"
+  },
+  {
+    "seq": 40,
+    "station": "fallback-03111",
+    "stationNm": "남영역",
+    "arsId": "03111"
+  },
+  {
+    "seq": 41,
+    "station": "fallback-03009",
+    "stationNm": "숙대입구역",
+    "arsId": "03009"
+  },
+  {
+    "seq": 42,
+    "station": "fallback-03011",
+    "stationNm": "갈월동",
+    "arsId": "03011"
+  },
+  {
+    "seq": 43,
+    "station": "fallback-02007",
+    "stationNm": "서울역버스환승센터.강우규의거터(7번승강장)",
+    "arsId": "02007"
+  },
+  {
+    "seq": 44,
+    "station": "fallback-02128",
+    "stationNm": "소공동주민센터",
+    "arsId": "02128"
+  },
+  {
+    "seq": 45,
+    "station": "fallback-02137",
+    "stationNm": "서울신문사",
+    "arsId": "02137"
+  },
+  {
+    "seq": 46,
+    "station": "fallback-01118",
+    "stationNm": "광화문역2번출구.KT광화문지사",
+    "arsId": "01118"
+  },
+  {
+    "seq": 47,
+    "station": "fallback-01116",
+    "stationNm": "경복궁역3번출구",
+    "arsId": "01116"
+  },
+  {
+    "seq": 48,
+    "station": "fallback-01111",
+    "stationNm": "통인시장종로구보건소",
+    "arsId": "01111"
+  },
+  {
+    "seq": 49,
+    "station": "fallback-01112",
+    "stationNm": "효자동",
+    "arsId": "01112"
+  },
+  {
+    "seq": 50,
+    "station": "fallback-01103",
+    "stationNm": "경기상고",
+    "arsId": "01103"
+  },
+  {
+    "seq": 51,
+    "station": "fallback-01140",
+    "stationNm": "자하문터널입구.석파정",
+    "arsId": "01140"
+  },
+  {
+    "seq": 52,
+    "station": "fallback-01141",
+    "stationNm": "하림각",
+    "arsId": "01141"
+  },
+  {
+    "seq": 53,
+    "station": "fallback-01286",
+    "stationNm": "상명대입구.세검정교회",
+    "arsId": "01286"
+  },
+  {
+    "seq": 54,
+    "station": "fallback-01278",
+    "stationNm": "상명대정문",
+    "arsId": "01278"
+  }
+]
