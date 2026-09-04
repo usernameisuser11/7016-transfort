@@ -1,18 +1,22 @@
 import 'dotenv/config';
 import express from 'express';
 import fs from 'node:fs';
-import path from 'node:path';
 import { XMLParser } from 'fast-xml-parser';
 import { GoogleGenAI } from '@google/genai';
 
 const app = express();
+app.set('trust proxy', 1);
+
 const PORT = Number(process.env.PORT || 3000);
-const SERVICE_KEY = process.env.DATA_GO_KR_SERVICE_KEY || '';
+const packageJson = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+const APP_VERSION = String(packageJson.version || '0.8.0');
+const SERVICE_KEY = String(process.env.DATA_GO_KR_SERVICE_KEY || '').trim();
 const PASSENGER_PROFILE_FILE = process.env.PASSENGER_PROFILE_FILE || 'data/7016-passenger-profile.json';
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
 const gemini = GEMINI_API_KEY ? new GoogleGenAI({ apiKey: GEMINI_API_KEY }) : null;
 const BUS_API = 'http://ws.bus.go.kr/api/rest';
+const SEOUL_TIME_ZONE = 'Asia/Seoul';
 const parser = new XMLParser({ ignoreAttributes: false, parseTagValue: false, trimValues: true });
 
 app.use(express.json({ limit: '64kb' }));
@@ -26,19 +30,110 @@ app.use(express.static('public', {
   etag: true,
   maxAge: process.env.NODE_ENV === 'production' ? '10m' : 0,
   setHeaders(res, filePath) {
-    if (filePath.endsWith('index.html')) {
-      res.setHeader('Cache-Control', 'no-cache');
-    }
+    if (filePath.endsWith('index.html')) res.setHeader('Cache-Control', 'no-cache');
   }
 }));
 
 const fallbackStops = JSON.parse(fs.readFileSync('data/7016-schoolbound-stops.json', 'utf8'));
 let passengerProfile = null;
 
+function asArray(v) { return v == null ? [] : Array.isArray(v) ? v : [v]; }
+function firstDefined(...v) { return v.find(x => x !== undefined && x !== null && x !== ''); }
+function clamp(n, min, max) { return Math.max(min, Math.min(max, n)); }
+function toNumber(v, fallback = null) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fallback;
+}
+function normName(s) {
+  return String(s ?? '')
+    .normalize('NFKC')
+    .replace(/\(\s*\d+\s*\)\s*$/g, '')
+    .replace(/\s+/g, '')
+    .replace(/[()_\-]/g, '')
+    .toLowerCase();
+}
+function seoulHour(date = new Date()) {
+  const value = new Intl.DateTimeFormat('en-US', {
+    timeZone: SEOUL_TIME_ZONE,
+    hour: '2-digit',
+    hourCycle: 'h23'
+  }).format(date);
+  return Number(value);
+}
+function daysInSourceMonth(sourceMonth) {
+  const m = String(sourceMonth || '').match(/^(\d{4})[-.]?(\d{2})$/);
+  if (!m) return null;
+  const year = Number(m[1]);
+  const month = Number(m[2]);
+  if (month < 1 || month > 12) return null;
+  return new Date(Date.UTC(year, month, 0)).getUTCDate();
+}
+function cloneProfile(p) {
+  return {
+    ...p,
+    hours: Array.isArray(p?.hours) ? p.hours.map(h => ({ ...h })) : []
+  };
+}
+
+function preparePassengerProfile(profile) {
+  if (!profile || typeof profile !== 'object') return null;
+  const byId = profile.byId || {};
+
+  // Legacy importer bug: byName referenced the first byId object directly, so
+  // duplicate stop names could mutate one direction's exact-ID profile into a
+  // two-direction aggregate. Repair those legacy exact profiles in memory.
+  if (!profile.valueBasis) {
+    const groups = new Map();
+    for (const p of Object.values(byId)) {
+      const key = normName(p?.stopName);
+      if (!key) continue;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(p);
+    }
+    for (const group of groups.values()) {
+      if (group.length < 2) continue;
+      const aggregate = group.find(p => p?.ambiguousName === true);
+      if (!aggregate) continue;
+      const others = group.filter(p => p !== aggregate);
+      aggregate.hours = (aggregate.hours || []).map((h, i) => {
+        const otherBoard = others.reduce((sum, p) => sum + Number(p.hours?.[i]?.board || 0), 0);
+        const otherAlight = others.reduce((sum, p) => sum + Number(p.hours?.[i]?.alight || 0), 0);
+        const board = Math.max(0, Number(h.board || 0) - otherBoard);
+        const alight = Math.max(0, Number(h.alight || 0) - otherAlight);
+        return { hour: Number(h.hour ?? i), board, alight, net: board - alight };
+      });
+      delete aggregate.ambiguousName;
+    }
+  }
+
+  // Always rebuild byName from independent clones so exact-ID data can never
+  // be changed by name aggregation.
+  const byName = {};
+  for (const p of Object.values(byId)) {
+    const key = normName(p?.stopName);
+    if (!key) continue;
+    if (!byName[key]) {
+      byName[key] = cloneProfile(p);
+      continue;
+    }
+    const aggregate = byName[key];
+    aggregate.ambiguousName = true;
+    for (let i = 0; i < 24; i++) {
+      const board = Number(aggregate.hours?.[i]?.board || 0) + Number(p.hours?.[i]?.board || 0);
+      const alight = Number(aggregate.hours?.[i]?.alight || 0) + Number(p.hours?.[i]?.alight || 0);
+      aggregate.hours[i] = { hour: i, board, alight, net: board - alight };
+    }
+  }
+  profile.byName = byName;
+  return profile;
+}
+
 function reloadPassengerProfile() {
   try {
-    passengerProfile = JSON.parse(fs.readFileSync(PASSENGER_PROFILE_FILE, 'utf8'));
-  } catch {
+    const loaded = JSON.parse(fs.readFileSync(PASSENGER_PROFILE_FILE, 'utf8'));
+    passengerProfile = preparePassengerProfile(loaded);
+  } catch (err) {
+    console.error('Passenger profile load error:', err.message);
     passengerProfile = null;
   }
 }
@@ -52,15 +147,7 @@ function cacheGet(key, ttlMs) {
   return hit.value;
 }
 function cacheSet(key, value) { cache.set(key, { at: Date.now(), value }); }
-function asArray(v) { return v == null ? [] : Array.isArray(v) ? v : [v]; }
-function firstDefined(...v) { return v.find(x => x !== undefined && x !== null && x !== ''); }
-function toNumber(v, fallback = null) {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : fallback;
-}
-function normName(s) {
-  return String(s ?? '').normalize('NFKC').replace(/\s+/g, '').replace(/[()_\-]/g, '').toLowerCase();
-}
+
 function xmlItems(xml) {
   const parsed = parser.parse(xml);
   const result = parsed?.ServiceResult;
@@ -74,7 +161,7 @@ async function busFetch(pathname, params = {}, ttlMs = 15000) {
   const url = `${BUS_API}/${pathname}?${qs}`;
   const cached = cacheGet(url, ttlMs);
   if (cached) return cached;
-  const res = await fetch(url, { headers: { 'User-Agent': '7016-campus-bus/0.2' } });
+  const res = await fetch(url, { headers: { 'User-Agent': `7016-campus-bus/${APP_VERSION}` } });
   if (!res.ok) throw new Error(`서울 버스 API HTTP ${res.status}`);
   const items = xmlItems(await res.text());
   cacheSet(url, items);
@@ -95,15 +182,11 @@ async function getStations(routeId) {
     arsId: String(firstDefined(s.arsId, '')),
     gpsX: toNumber(firstDefined(s.gpsX, s.tmX)),
     gpsY: toNumber(firstDefined(s.gpsY, s.tmY))
-  })).sort((a,b) => a.seq - b.seq);
+  })).sort((a, b) => a.seq - b.seq);
 }
 function schoolboundSlice(stations) {
-  const destIndexes = stations
-    .map((s, i) => ({ s, i }))
-    .filter(x => /상명대정문/.test(x.s.stationNm));
-  if (!destIndexes.length) return stations;
-  // 첫 상명대정문이 학교 방향 종점이고, 이후는 회차 후 반대 방향.
-  return stations.slice(0, destIndexes[0].i + 1);
+  const destIndex = stations.findIndex(s => /상명대정문/.test(s.stationNm));
+  return destIndex >= 0 ? stations.slice(0, destIndex + 1) : stations;
 }
 function normalizeArrival(a) {
   return {
@@ -127,36 +210,83 @@ function normalizeArrival(a) {
 function congestionMeta(code, fullFlag = 0) {
   if (Number(fullFlag) === 1) return { code: 7, label: '만차', level: 'very-busy' };
   return ({
-    0:{code:0,label:'정보 없음',level:'unknown'},
-    3:{code:3,label:'여유',level:'easy'},
-    4:{code:4,label:'보통',level:'normal'},
-    5:{code:5,label:'혼잡',level:'busy'},
-    6:{code:6,label:'매우 혼잡',level:'very-busy'}
-  })[Number(code || 0)] || { code:Number(code||0), label:'정보 없음', level:'unknown' };
+    0: { code: 0, label: '정보 없음', level: 'unknown' },
+    3: { code: 3, label: '여유', level: 'easy' },
+    4: { code: 4, label: '보통', level: 'normal' },
+    5: { code: 5, label: '혼잡', level: 'busy' },
+    6: { code: 6, label: '매우 혼잡', level: 'very-busy' }
+  })[Number(code || 0)] || { code: Number(code || 0), label: '정보 없음', level: 'unknown' };
 }
-function matchDestinationTravel(board, destination, idx) {
+
+function haversineKm(a, b) {
+  const lat1 = Number(a?.gpsY), lon1 = Number(a?.gpsX);
+  const lat2 = Number(b?.gpsY), lon2 = Number(b?.gpsX);
+  if (![lat1, lon1, lat2, lon2].every(Number.isFinite)) return null;
+  const rad = Math.PI / 180;
+  const dLat = (lat2 - lat1) * rad;
+  const dLon = (lon2 - lon1) * rad;
+  const x = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * rad) * Math.cos(lat2 * rad) * Math.sin(dLon / 2) ** 2;
+  return 6371 * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
+}
+function routeDistanceKm(stations, boardOrd, destOrd) {
+  const segment = stations.filter(s => s.seq >= boardOrd && s.seq <= destOrd).sort((a, b) => a.seq - b.seq);
+  if (segment.length < 2) return null;
+  let total = 0;
+  for (let i = 1; i < segment.length; i++) {
+    const d = haversineKm(segment[i - 1], segment[i]);
+    if (d == null || d > 5) return null;
+    total += d;
+  }
+  return total > 0 ? total : null;
+}
+function routeEstimateSeconds(stations, boardOrd, destOrd) {
+  const stopGap = Math.max(1, destOrd - boardOrd);
+  const distanceKm = routeDistanceKm(stations, boardOrd, destOrd);
+  if (distanceKm == null) return stopGap * 115;
+  // Adjacent-stop straight-line distance is close enough for a conservative
+  // city-bus estimate. 15 km/h effective speed + short dwell allowance.
+  const raw = (distanceKm / 15) * 3600 + stopGap * 20;
+  return Math.round(clamp(raw, stopGap * 55, stopGap * 240));
+}
+function vehicleEtaAt(arrival, vehId) {
+  if (!arrival || !vehId) return null;
+  if (arrival.vehId1 === vehId) return arrival.traTime1;
+  if (arrival.vehId2 === vehId) return arrival.traTime2;
+  return null;
+}
+function estimateDestinationTravel(board, arrivals, idx, stations, boardOrd, destOrd) {
   const vehId = idx === 1 ? board.vehId1 : board.vehId2;
   const boardEta = idx === 1 ? board.traTime1 : board.traTime2;
-  if (!vehId || boardEta == null || !destination) return null;
-  let destEta = null;
-  if (destination.vehId1 === vehId) destEta = destination.traTime1;
-  if (destination.vehId2 === vehId) destEta = destination.traTime2;
-  if (destEta == null || destEta < boardEta) return null;
-  return Math.max(0, destEta - boardEta);
-}
-function fallbackTravelSeconds(boardOrd, destOrd, positions) {
+  if (!vehId || boardEta == null) return { seconds: routeEstimateSeconds(stations, boardOrd, destOrd), source: 'route-estimate' };
+
+  const candidates = arrivals
+    .filter(a => a.ord != null && a.ord > boardOrd && a.ord <= destOrd)
+    .map(a => ({ ord: a.ord, eta: vehicleEtaAt(a, vehId) }))
+    .filter(x => x.eta != null && x.eta >= boardEta)
+    .sort((a, b) => a.ord - b.ord);
+
+  const destinationMatch = candidates.find(x => x.ord === destOrd);
+  if (destinationMatch) {
+    return { seconds: Math.max(0, destinationMatch.eta - boardEta), source: 'vehicle-match' };
+  }
+
+  const routeBase = routeEstimateSeconds(stations, boardOrd, destOrd);
+  const farthest = candidates.at(-1);
+  if (!farthest) return { seconds: routeBase, source: 'route-estimate' };
+
+  const coveredStops = farthest.ord - boardOrd;
+  const observedRide = Math.max(0, farthest.eta - boardEta);
+  if (coveredStops <= 0 || observedRide <= 0) return { seconds: routeBase, source: 'route-estimate' };
+
+  const secondsPerStop = clamp(observedRide / coveredStops, 50, 240);
+  const remainingStops = Math.max(0, destOrd - farthest.ord);
+  const extrapolated = observedRide + remainingStops * secondsPerStop;
+  const blended = extrapolated * 0.7 + routeBase * 0.3;
   const stopGap = Math.max(1, destOrd - boardOrd);
-  const nextTimes = positions
-    .filter(p => {
-      const ord = toNumber(p.sectOrd);
-      return ord != null && ord >= boardOrd && ord <= destOrd;
-    })
-    .map(p => toNumber(p.nextStTm))
-    .filter(v => v != null && v >= 20 && v <= 1200);
-  const avgSection = nextTimes.length ? nextTimes.reduce((a,b)=>a+b,0)/nextTimes.length : 82;
-  return Math.round(stopGap * avgSection * 1.10);
+  const bounded = clamp(blended, Math.max(stopGap * 45, routeBase * 0.55), Math.max(stopGap * 240, routeBase * 1.8));
+  return { seconds: Math.round(bounded), source: 'vehicle-extrapolation' };
 }
-function makeBusCard(board, destination, positions, idx, boardOrd, destOrd) {
+function makeBusCard(board, arrivals, positions, idx, stations, boardOrd, destOrd) {
   const vehId = idx === 1 ? board.vehId1 : board.vehId2;
   const etaSec = idx === 1 ? board.traTime1 : board.traTime2;
   const arrMsg = idx === 1 ? board.arrmsg1 : board.arrmsg2;
@@ -164,29 +294,34 @@ function makeBusCard(board, destination, positions, idx, boardOrd, destOrd) {
   const full = idx === 1 ? board.isFullFlag1 : board.isFullFlag2;
   const pos = positions.find(p => String(p.vehId) === vehId);
   const congestion = congestionMeta(firstDefined(pos?.congetion, 0), firstDefined(pos?.isFullFlag, full, 0));
-  const matched = matchDestinationTravel(board, destination, idx);
-  const rideSec = matched ?? fallbackTravelSeconds(boardOrd, destOrd, positions);
+  const estimate = estimateDestinationTravel(board, arrivals, idx, stations, boardOrd, destOrd);
+  const rideSec = estimate.seconds;
   return {
-    index: idx, vehId, plainNo: plainNo || String(pos?.plainNo || ''),
-    etaSec, arrMsg, congestion,
+    index: idx,
+    vehId,
+    plainNo: plainNo || String(pos?.plainNo || ''),
+    etaSec,
+    arrMsg,
+    congestion,
     lowFloor: Number(pos?.busType) === 1,
     sectionOrd: toNumber(pos?.sectOrd),
     destinationRideSec: rideSec,
     destinationEtaSec: etaSec == null ? null : etaSec + rideSec,
-    destinationEtaSource: matched != null ? 'vehicle-match' : 'section-estimate'
+    destinationEtaSource: estimate.source
   };
 }
 function recommendation(first, second, historical) {
-  if (!first || first.etaSec == null) return { action:'WAIT', title:'도착 정보를 기다리는 중', reason:'첫 번째 차량 ETA가 아직 없습니다.' };
-  if (!second || second.etaSec == null) return { action:'TAKE_NOW', title:'이번 버스 타기', reason:'다음 차량 정보가 없어 현재 차량을 추천합니다.' };
-  const gap = second.etaSec - first.etaSec;
-  const firstBad = ['busy','very-busy'].includes(first.congestion.level);
-  const secondGood = ['easy','normal'].includes(second.congestion.level);
-  if (firstBad && secondGood && gap <= 360) return { action:'WAIT_NEXT', title:'다음 버스 추천', reason:`첫 차는 ${first.congestion.label}이고 다음 차까지 약 ${Math.max(1,Math.round(gap/60))}분입니다.` };
-  if (first.congestion.level === 'very-busy' && gap <= 480) return { action:'WAIT_NEXT', title:'다음 버스 고려', reason:`첫 차가 ${first.congestion.label}이고 다음 차가 약 ${Math.max(1,Math.round(gap/60))}분 뒤입니다.` };
+  if (!first || first.etaSec == null) return { action: 'WAIT', title: '도착 정보를 기다리는 중', reason: '첫 번째 차량 ETA가 아직 없습니다.' };
+  if (!second || second.etaSec == null) return { action: 'TAKE_NOW', title: '이번 버스 타기', reason: '다음 차량 정보가 없어 현재 차량을 추천합니다.' };
+  const gap = Math.max(0, second.etaSec - first.etaSec);
+  const firstBad = ['busy', 'very-busy'].includes(first.congestion.level);
+  const secondGood = ['easy', 'normal'].includes(second.congestion.level);
+  if (firstBad && secondGood && gap <= 360) return { action: 'WAIT_NEXT', title: '다음 버스 추천', reason: `첫 차는 ${first.congestion.label}이고 다음 차까지 약 ${Math.max(1, Math.round(gap / 60))}분입니다.` };
+  if (first.congestion.level === 'very-busy' && gap <= 480) return { action: 'WAIT_NEXT', title: '다음 버스 고려', reason: `첫 차가 ${first.congestion.label}이고 다음 차가 약 ${Math.max(1, Math.round(gap / 60))}분 뒤입니다.` };
   const histNote = historical?.level === 'high' ? ' 이 시간대 승차 수요도 높은 편입니다.' : '';
-  return { action:'TAKE_NOW', title:'이번 버스 타기', reason:`다음 차와 약 ${Math.max(1,Math.round(gap/60))}분 차이라 지금 타는 편이 빠릅니다.${histNote}` };
+  return { action: 'TAKE_NOW', title: '이번 버스 타기', reason: `다음 차와 약 ${Math.max(1, Math.round(gap / 60))}분 차이라 지금 타는 편이 빠릅니다.${histNote}` };
 }
+
 function historicalForStation(station) {
   if (!passengerProfile) return null;
   const byId = passengerProfile.byId || {};
@@ -199,9 +334,17 @@ function historicalForStation(station) {
     sourceMonth: passengerProfile.sourceMonth || null,
     sourceFile: passengerProfile.sourceFile || null
   };
-  const hour = new Date().getHours();
-  const h = p.hours?.[hour] || { hour, board:0, alight:0, net:0 };
-  const maxBoard = Math.max(1, ...p.hours.map(x => Number(x.board || 0)));
+
+  const days = Number(passengerProfile.daysInMonth) || daysInSourceMonth(passengerProfile.sourceMonth) || 1;
+  const divisor = passengerProfile.valueBasis === 'daily-average' ? 1 : days;
+  const hours = (p.hours || []).map((x, hour) => {
+    const board = Number(x.board || 0) / divisor;
+    const alight = Number(x.alight || 0) / divisor;
+    return { hour: Number(x.hour ?? hour), board, alight, net: board - alight };
+  });
+  const hour = seoulHour();
+  const h = hours[hour] || { hour, board: 0, alight: 0, net: 0 };
+  const maxBoard = Math.max(1, ...hours.map(x => Number(x.board || 0)));
   const ratio = Number(h.board || 0) / maxBoard;
   const level = ratio >= .72 ? 'high' : ratio >= .38 ? 'medium' : 'low';
   return {
@@ -210,131 +353,160 @@ function historicalForStation(station) {
     ambiguousName: Boolean(p.ambiguousName && !exact),
     sourceMonth: passengerProfile.sourceMonth || null,
     sourceFile: passengerProfile.sourceFile || null,
+    valueBasis: 'daily-average',
+    daysInMonth: days,
     hour,
     board: Number(h.board || 0),
     alight: Number(h.alight || 0),
     net: Number(h.net || 0),
     level,
-    hours: p.hours
+    hours
   };
 }
 
 function demoPassenger(station) {
-  const hour = new Date().getHours();
+  const hour = seoulHour();
   const base = Math.max(3, 24 - Math.abs(hour - 9) * 2);
   const factor = /경복궁|서울역|홍대|공덕/.test(station.stationNm) ? 1.45 : 1;
   const board = Math.round(base * factor);
   const alight = Math.max(1, Math.round(board * .35));
-  const hours = Array.from({length:24},(_,h)=>{
-    const b = Math.max(1, Math.round((24-Math.abs(h-9)*2)*factor));
-    return {hour:h, board:b, alight:Math.max(1,Math.round(b*.35)), net:Math.round(b*.65)};
+  const hours = Array.from({ length: 24 }, (_, h) => {
+    const b = Math.max(1, Math.round((24 - Math.abs(h - 9) * 2) * factor));
+    return { hour: h, board: b, alight: Math.max(1, Math.round(b * .35)), net: Math.round(b * .65) };
   });
-  return { available:true, demo:true, sourceMonth:'2026-07 DEMO', hour, board, alight, net:board-alight, level:board>25?'high':board>12?'medium':'low', hours };
+  return { available: true, demo: true, sourceMonth: 'DEMO', valueBasis: 'daily-average', hour, board, alight, net: board - alight, level: board > 25 ? 'high' : board > 12 ? 'medium' : 'low', hours };
 }
-
 function demoBootstrap() {
   return {
-    mode:'demo',
-    route:{busRouteId:'DEMO-7016',busRouteNm:'7016',stStationNm:'은평공영차고지',edStationNm:'상명대정문',term:9},
-    stations:fallbackStops,
-    stopCount:fallbackStops.length,
-    suggestedBoardingSeq:fallbackStops.find(s=>/경복궁역3번출구/.test(s.stationNm))?.seq || 47,
-    destinationSeq:fallbackStops.length,
-    passengerData:{available:Boolean(passengerProfile), sourceMonth:passengerProfile?.sourceMonth || null},
-    geminiConfigured:Boolean(GEMINI_API_KEY)
+    mode: 'demo',
+    route: { busRouteId: 'DEMO-7016', busRouteNm: '7016', stStationNm: '은평공영차고지', edStationNm: '상명대정문', term: 9 },
+    stations: fallbackStops,
+    stopCount: fallbackStops.length,
+    suggestedBoardingSeq: fallbackStops.find(s => /경복궁역3번출구/.test(s.stationNm))?.seq || 47,
+    destinationSeq: fallbackStops.length,
+    passengerData: { available: Boolean(passengerProfile), sourceMonth: passengerProfile?.sourceMonth || null },
+    geminiConfigured: Boolean(GEMINI_API_KEY)
   };
 }
 
-app.get('/api/bootstrap', async (req,res)=>{
+app.get('/api/bootstrap', async (req, res) => {
   if (!SERVICE_KEY) return res.json(demoBootstrap());
   try {
     const route = await get7016Route();
     const all = await getStations(String(route.busRouteId));
     const stations = schoolboundSlice(all);
-    const destination = stations[stations.length-1];
-    const suggested = stations.find(s=>/경복궁역.*3번출구/.test(s.stationNm)) || stations[Math.max(0,stations.length-8)];
+    const destination = stations.at(-1);
+    const suggested = stations.find(s => /경복궁역.*3번출구/.test(s.stationNm)) || stations[Math.max(0, stations.length - 8)];
     res.json({
-      mode:'live',
-      route:{
-        busRouteId:String(route.busRouteId),busRouteNm:String(route.busRouteNm||'7016'),
-        stStationNm:String(route.stStationNm||''),edStationNm:String(route.edStationNm||''),
-        term:toNumber(route.term),firstBusTm:String(route.firstBusTm||''),lastBusTm:String(route.lastBusTm||'')
+      mode: 'live',
+      route: {
+        busRouteId: String(route.busRouteId),
+        busRouteNm: String(route.busRouteNm || '7016'),
+        stStationNm: String(route.stStationNm || ''),
+        edStationNm: String(route.edStationNm || ''),
+        term: toNumber(route.term),
+        firstBusTm: String(route.firstBusTm || ''),
+        lastBusTm: String(route.lastBusTm || '')
       },
-      stations, stopCount:stations.length,
-      suggestedBoardingSeq:suggested?.seq ?? stations[0]?.seq,
-      destinationSeq:destination?.seq,
-      passengerData:{available:Boolean(passengerProfile),sourceMonth:passengerProfile?.sourceMonth || null},
-      geminiConfigured:Boolean(GEMINI_API_KEY)
+      stations,
+      stopCount: stations.length,
+      suggestedBoardingSeq: suggested?.seq ?? stations[0]?.seq,
+      destinationSeq: destination?.seq,
+      passengerData: { available: Boolean(passengerProfile), sourceMonth: passengerProfile?.sourceMonth || null },
+      geminiConfigured: Boolean(GEMINI_API_KEY)
     });
-  } catch(err) {
+  } catch (err) {
     console.error(err);
-    res.status(502).json({error:err.message || 'bootstrap 실패'});
+    res.status(502).json({ error: err.message || 'bootstrap 실패' });
   }
 });
 
-function demoDashboard(boardOrd,destOrd) {
-  const board = fallbackStops.find(s=>s.seq===boardOrd) || fallbackStops[46];
-  const dest = fallbackStops.find(s=>s.seq===destOrd) || fallbackStops.at(-1);
+function demoDashboard(boardOrd, destOrd) {
+  const board = fallbackStops.find(s => s.seq === boardOrd) || fallbackStops[46];
+  const dest = fallbackStops.find(s => s.seq === destOrd) || fallbackStops.at(-1);
   const hist = passengerProfile ? historicalForStation(board) : demoPassenger(board);
   const buses = [
-    {index:1,vehId:'demo-1',plainNo:'서울74사7016',etaSec:210,arrMsg:'약 3분 30초 후',congestion:{code:4,label:'보통',level:'normal'},lowFloor:true,sectionOrd:Math.max(1,boardOrd-2),destinationRideSec:780,destinationEtaSec:990,destinationEtaSource:'vehicle-match'},
-    {index:2,vehId:'demo-2',plainNo:'서울74사7716',etaSec:690,arrMsg:'약 11분 30초 후',congestion:{code:3,label:'여유',level:'easy'},lowFloor:true,sectionOrd:Math.max(1,boardOrd-7),destinationRideSec:760,destinationEtaSec:1450,destinationEtaSource:'section-estimate'}
+    { index: 1, vehId: 'demo-1', plainNo: '서울74사7016', etaSec: 210, arrMsg: '약 3분 30초 후', congestion: { code: 4, label: '보통', level: 'normal' }, lowFloor: true, sectionOrd: Math.max(1, boardOrd - 2), destinationRideSec: 780, destinationEtaSec: 990, destinationEtaSource: 'vehicle-match' },
+    { index: 2, vehId: 'demo-2', plainNo: '서울74사7716', etaSec: 690, arrMsg: '약 11분 30초 후', congestion: { code: 3, label: '여유', level: 'easy' }, lowFloor: true, sectionOrd: Math.max(1, boardOrd - 7), destinationRideSec: 760, destinationEtaSec: 1450, destinationEtaSource: 'route-estimate' }
   ];
   return {
-    mode:'demo',updatedAt:new Date().toISOString(),
-    boarding:{ord:boardOrd,station:board.station,stationNm:board.stationNm,arsId:board.arsId},
-    destination:{ord:destOrd,stationNm:dest.stationNm,arsId:dest.arsId},
-    scheduledTermMin:9,actualHeadwayMin:8,buses,
-    recommendation:recommendation(buses[0],buses[1],hist),
-    runningBusCount:24,historical:hist
+    mode: 'demo',
+    updatedAt: new Date().toISOString(),
+    boarding: { ord: boardOrd, station: board.station, stationNm: board.stationNm, arsId: board.arsId },
+    destination: { ord: destOrd, stationNm: dest.stationNm, arsId: dest.arsId },
+    scheduledTermMin: 9,
+    actualHeadwayMin: 8,
+    buses,
+    recommendation: recommendation(buses[0], buses[1], hist),
+    runningBusCount: 24,
+    historical: hist
   };
 }
 
-app.get('/api/dashboard', async (req,res)=>{
-  const boardOrd = Number(req.query.boardOrd), destOrd = Number(req.query.destOrd);
-  if (!Number.isFinite(boardOrd)||!Number.isFinite(destOrd)) return res.status(400).json({error:'boardOrd와 destOrd가 필요합니다.'});
-  if (!SERVICE_KEY) return res.json(demoDashboard(boardOrd,destOrd));
+app.get('/api/dashboard', async (req, res) => {
+  const boardOrd = Number(req.query.boardOrd);
+  const destOrd = Number(req.query.destOrd);
+  if (!Number.isFinite(boardOrd) || !Number.isFinite(destOrd)) return res.status(400).json({ error: 'boardOrd와 destOrd가 필요합니다.' });
+  if (boardOrd >= destOrd) return res.status(400).json({ error: '승차 정류장은 상명대정문보다 앞에 있어야 합니다.' });
+  if (!SERVICE_KEY) return res.json(demoDashboard(boardOrd, destOrd));
 
   try {
     const route = await get7016Route();
     const routeId = String(route.busRouteId);
-    const [allStations,arrivalRows,positionRows] = await Promise.all([
+    const [allStations, arrivalRows, positionRows] = await Promise.all([
       getStations(routeId),
-      busFetch('arrive/getArrInfoByRouteAll',{busRouteId:routeId},10000),
-      busFetch('buspos/getBusPosByRtid',{busRouteId:routeId},10000)
+      busFetch('arrive/getArrInfoByRouteAll', { busRouteId: routeId }, 10000),
+      busFetch('buspos/getBusPosByRtid', { busRouteId: routeId }, 10000)
     ]);
     const stations = schoolboundSlice(allStations);
     const arrivals = arrivalRows.map(normalizeArrival);
-    const boardingStation = stations.find(s=>s.seq===boardOrd);
-    const destinationStation = stations.find(s=>s.seq===destOrd);
-    if (!boardingStation||!destinationStation) throw new Error('선택한 정류장을 학교 방향 노선에서 찾지 못했습니다.');
-    const board = arrivals.find(a => (a.ord!=null&&a.ord===boardOrd) || a.stId===boardingStation.station);
-    const dest = arrivals.find(a => (a.ord!=null&&a.ord===destOrd) || a.stId===destinationStation.station);
+    const activePositions = positionRows.filter(p => String(firstDefined(p.isrunyn, '1')) !== '0');
+    const boardingStation = stations.find(s => s.seq === boardOrd);
+    const destinationStation = stations.find(s => s.seq === destOrd);
+    if (!boardingStation || !destinationStation) throw new Error('선택한 정류장을 학교 방향 노선에서 찾지 못했습니다.');
+    const board = arrivals.find(a => (a.ord != null && a.ord === boardOrd) || a.stId === boardingStation.station);
     if (!board) throw new Error('선택한 승차 정류장의 도착정보를 찾지 못했습니다.');
-    const bus1=makeBusCard(board,dest,positionRows,1,boardOrd,destOrd);
-    const bus2=makeBusCard(board,dest,positionRows,2,boardOrd,destOrd);
-    const gap=bus1.etaSec!=null&&bus2.etaSec!=null ? Math.max(0,bus2.etaSec-bus1.etaSec) : null;
-    const historical=historicalForStation(boardingStation);
+
+    const bus1 = makeBusCard(board, arrivals, activePositions, 1, stations, boardOrd, destOrd);
+    const bus2 = makeBusCard(board, arrivals, activePositions, 2, stations, boardOrd, destOrd);
+    const gap = bus1.etaSec != null && bus2.etaSec != null ? Math.max(0, bus2.etaSec - bus1.etaSec) : null;
+    const historical = historicalForStation(boardingStation);
     res.json({
-      mode:'live',updatedAt:new Date().toISOString(),
-      boarding:{ord:boardOrd,station:boardingStation.station,stationNm:boardingStation.stationNm,arsId:boardingStation.arsId},
-      destination:{ord:destOrd,stationNm:destinationStation.stationNm,arsId:destinationStation.arsId},
-      scheduledTermMin:board.term??toNumber(route.term),
-      actualHeadwayMin:gap==null?null:Math.round(gap/60),
-      buses:[bus1,bus2],
-      recommendation:recommendation(bus1,bus2,historical),
-      runningBusCount:positionRows.length,
+      mode: 'live',
+      updatedAt: new Date().toISOString(),
+      boarding: { ord: boardOrd, station: boardingStation.station, stationNm: boardingStation.stationNm, arsId: boardingStation.arsId },
+      destination: { ord: destOrd, stationNm: destinationStation.stationNm, arsId: destinationStation.arsId },
+      scheduledTermMin: board.term ?? toNumber(route.term),
+      actualHeadwayMin: gap == null ? null : Math.round(gap / 60),
+      buses: [bus1, bus2],
+      recommendation: recommendation(bus1, bus2, historical),
+      runningBusCount: activePositions.length,
       historical
     });
-  } catch(err) {
+  } catch (err) {
     console.error(err);
-    res.status(502).json({error:err.message || 'dashboard 실패'});
+    res.status(502).json({ error: err.message || 'dashboard 실패' });
   }
 });
 
-
 const aiAdviceCache = new Map();
-
+const aiRateLimit = new Map();
+function aiRequestAllowed(req) {
+  const key = String(req.ip || req.headers['x-forwarded-for'] || 'unknown');
+  const now = Date.now();
+  const windowMs = 10 * 60 * 1000;
+  const limit = 12;
+  const recent = (aiRateLimit.get(key) || []).filter(t => now - t < windowMs);
+  if (recent.length >= limit) return false;
+  recent.push(now);
+  aiRateLimit.set(key, recent);
+  if (aiRateLimit.size > 300) {
+    for (const [k, times] of aiRateLimit) {
+      if (!times.some(t => now - t < windowMs)) aiRateLimit.delete(k);
+    }
+  }
+  return true;
+}
 function safeAiContext(body = {}) {
   const bus = (b = {}) => ({
     etaSec: toNumber(b.etaSec),
@@ -368,7 +540,6 @@ function safeAiContext(body = {}) {
     updatedAt: String(body.updatedAt || '').slice(0, 40),
   };
 }
-
 function fallbackAiAdvice(ctx) {
   const action = ctx.ruleRecommendation.action || 'NEUTRAL';
   const firstCong = ctx.firstBus.congestion;
@@ -382,10 +553,8 @@ function fallbackAiAdvice(ctx) {
     source: 'rule-fallback',
   };
 }
-
 async function getGeminiAdvice(ctx) {
   if (!gemini) return fallbackAiAdvice(ctx);
-
   const cacheKey = JSON.stringify(ctx);
   const cached = aiAdviceCache.get(cacheKey);
   if (cached && Date.now() - cached.at < 3 * 60 * 1000) return cached.value;
@@ -393,31 +562,14 @@ async function getGeminiAdvice(ctx) {
   const schema = {
     type: 'object',
     properties: {
-      decision: {
-        type: 'string',
-        enum: ['TAKE_NOW', 'WAIT_NEXT', 'NEUTRAL'],
-        description: '추천 행동'
-      },
-      headline: {
-        type: 'string',
-        description: '20자 안팎의 매우 짧은 한국어 결론'
-      },
-      reason: {
-        type: 'string',
-        description: '실시간 ETA, 배차, 혼잡도, 과거 수요 중 실제 제공된 수치를 근거로 한 1~2문장 설명'
-      },
-      risk: {
-        type: 'string',
-        description: '불확실성 또는 주의점 한 문장'
-      },
-      tip: {
-        type: 'string',
-        description: '사용자가 바로 행동할 수 있는 짧은 팁 한 문장'
-      }
+      decision: { type: 'string', enum: ['TAKE_NOW', 'WAIT_NEXT', 'NEUTRAL'], description: '추천 행동' },
+      headline: { type: 'string', description: '20자 안팎의 매우 짧은 한국어 결론' },
+      reason: { type: 'string', description: '실시간 ETA, 배차, 혼잡도, 과거 수요 중 실제 제공된 수치를 근거로 한 1~2문장 설명' },
+      risk: { type: 'string', description: '불확실성 또는 주의점 한 문장' },
+      tip: { type: 'string', description: '사용자가 바로 행동할 수 있는 짧은 팁 한 문장' }
     },
     required: ['decision', 'headline', 'reason', 'risk', 'tip']
   };
-
   const prompt = [
     '너는 서울 7016번 버스로 상명대학교에 통학하는 사람을 돕는 교통 의사결정 보조 AI다.',
     '아래 데이터만 사용해서 지금 오는 첫 번째 버스를 탈지, 다음 버스를 기다릴지 판단하라.',
@@ -425,7 +577,7 @@ async function getGeminiAdvice(ctx) {
     '1. 없는 사실이나 승객 수를 만들어내지 말 것.',
     '2. 실시간 차량 혼잡도가 있으면 과거 승하차 평균보다 우선할 것.',
     '3. 과거 승하차 데이터가 DEMO이면 판단 근거로 강하게 사용하지 말 것.',
-    '4. 상명대 도착 ETA가 추정치(section-estimate)면 그 불확실성을 risk에 밝힐 것.',
+    '4. 상명대 도착 ETA의 source가 vehicle-match가 아니면 추정치라는 점을 risk에 밝힐 것.',
     '5. 두 차량의 시간 차이가 크면 시간 절약을 우선하고, 차이가 작고 첫 차가 혼잡하면 쾌적함을 고려할 것.',
     '6. 기존 ruleRecommendation을 참고하되 그대로 복사할 필요는 없다.',
     '7. 답변은 짧고 자연스러운 한국어로 할 것.',
@@ -437,15 +589,11 @@ async function getGeminiAdvice(ctx) {
     const interaction = await gemini.interactions.create({
       model: GEMINI_MODEL,
       input: prompt,
-      response_format: {
-        type: 'text',
-        mime_type: 'application/json',
-        schema
-      }
+      response_format: { type: 'text', mime_type: 'application/json', schema }
     });
     const parsed = JSON.parse(interaction.output_text || '{}');
     const value = {
-      decision: ['TAKE_NOW','WAIT_NEXT','NEUTRAL'].includes(parsed.decision) ? parsed.decision : 'NEUTRAL',
+      decision: ['TAKE_NOW', 'WAIT_NEXT', 'NEUTRAL'].includes(parsed.decision) ? parsed.decision : 'NEUTRAL',
       headline: String(parsed.headline || 'AI 분석 완료').slice(0, 100),
       reason: String(parsed.reason || '').slice(0, 500),
       risk: String(parsed.risk || '').slice(0, 300),
@@ -454,49 +602,42 @@ async function getGeminiAdvice(ctx) {
       model: GEMINI_MODEL,
     };
     aiAdviceCache.set(cacheKey, { at: Date.now(), value });
-    if (aiAdviceCache.size > 80) {
-      const oldest = aiAdviceCache.keys().next().value;
-      aiAdviceCache.delete(oldest);
-    }
+    if (aiAdviceCache.size > 80) aiAdviceCache.delete(aiAdviceCache.keys().next().value);
     return value;
   } catch (err) {
     console.error('Gemini advice error:', err);
-    return {
-      ...fallbackAiAdvice(ctx),
-      risk: `Gemini 호출 오류로 기존 규칙 기반 판단을 표시합니다.`,
-      errorCode: 'GEMINI_CALL_FAILED'
-    };
+    return { ...fallbackAiAdvice(ctx), risk: 'Gemini 호출 오류로 기존 규칙 기반 판단을 표시합니다.', errorCode: 'GEMINI_CALL_FAILED' };
   }
 }
 
 app.post('/api/ai-advice', async (req, res) => {
+  if (!aiRequestAllowed(req)) return res.status(429).json({ error: 'AI 분석 요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.' });
   const ctx = safeAiContext(req.body || {});
-  if (!ctx.boarding || !ctx.destination) {
-    return res.status(400).json({ error: '현재 통학 데이터가 필요합니다.' });
-  }
+  if (!ctx.boarding || !ctx.destination) return res.status(400).json({ error: '현재 통학 데이터가 필요합니다.' });
   const advice = await getGeminiAdvice(ctx);
-  res.json({
-    ok: true,
-    configured: Boolean(gemini),
-    advice
-  });
+  res.json({ ok: true, configured: Boolean(gemini), advice });
 });
 
-app.post('/api/reload-passenger-profile',(req,res)=>{
+app.post('/api/reload-passenger-profile', (req, res) => {
+  if (process.env.NODE_ENV === 'production') return res.status(404).json({ error: 'Not found' });
   reloadPassengerProfile();
-  res.json({ok:true,available:Boolean(passengerProfile),sourceMonth:passengerProfile?.sourceMonth||null});
+  res.json({ ok: true, available: Boolean(passengerProfile), sourceMonth: passengerProfile?.sourceMonth || null });
 });
-app.get('/api/health',(req,res)=>res.json({
-  ok:true,service:'7016-campus-bus',version:'0.2.0',
-  liveApiConfigured:Boolean(SERVICE_KEY),
-  passengerProfileLoaded:Boolean(passengerProfile),
-  passengerSourceMonth:passengerProfile?.sourceMonth||null,
-  geminiConfigured:Boolean(GEMINI_API_KEY),
-  geminiModel:GEMINI_API_KEY ? GEMINI_MODEL : null
+app.get('/api/health', (req, res) => res.json({
+  ok: true,
+  service: '7016-campus-bus',
+  version: APP_VERSION,
+  timeZone: SEOUL_TIME_ZONE,
+  liveApiConfigured: Boolean(SERVICE_KEY),
+  passengerProfileLoaded: Boolean(passengerProfile),
+  passengerSourceMonth: passengerProfile?.sourceMonth || null,
+  passengerValueBasis: passengerProfile?.valueBasis || (passengerProfile ? 'legacy-monthly-total/normalized-at-runtime' : null),
+  geminiConfigured: Boolean(GEMINI_API_KEY),
+  geminiModel: GEMINI_API_KEY ? GEMINI_MODEL : null
 }));
 
-app.listen(PORT, '0.0.0.0', ()=>{
-  console.log(`7016 Campus Bus V2: http://localhost:${PORT}`);
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`7016 Campus Bus v${APP_VERSION}: http://localhost:${PORT}`);
   console.log(`정류장 fallback: ${fallbackStops.length}개`);
   console.log(`승하차 프로필: ${passengerProfile ? 'loaded' : 'not loaded'}`);
 });
