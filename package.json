@@ -1,11 +1,11 @@
 {
   "name": "7016-campus-bus",
-  "version": "0.4.0",
+  "version": "0.7.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "node --watch server.js",
-    "start": "node server.js",
+    "dev": "node --import ./key-patch.mjs --watch server.js",
+    "start": "node --import ./key-patch.mjs server.js",
     "import:passengers": "node scripts/import-passenger-csv.mjs"
   },
   "dependencies": {
