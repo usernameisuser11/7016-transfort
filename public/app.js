@@ -226,7 +226,7 @@ async function loadAiAdvice() {
     $('aiEmpty').textContent = `AI 분석 오류: ${err.message}`;
   } finally {
     button.disabled = false;
-    button.textContent = 'Gemini 분석';
+    button.textContent = 'AI 분석';
   }
 }
 
@@ -236,6 +236,7 @@ async function init() {
     const res=await fetch('/api/bootstrap',{cache:'no-store'});
     bootstrap=await res.json();
     if (!res.ok) throw new Error(bootstrap.error||'노선 정보를 불러오지 못했습니다.');
+    $('modeBadge').className=bootstrap.mode==='live'?'mode-badge live':'mode-badge';
     $('modeBadge').textContent=bootstrap.mode==='live'?'LIVE API':'DEMO MODE';
     if (!bootstrap.geminiConfigured) {
       $('aiEmpty').textContent = 'Gemini API 키를 넣으면 이 버튼이 실시간 배차·혼잡도·시간대 수요를 종합 분석해줘';
@@ -244,6 +245,7 @@ async function init() {
     await loadDashboard({ manual: false });
     clearInterval(timer); timer=setInterval(() => loadDashboard({ manual: false }),30000);
   } catch(err) {
+    $('modeBadge').className='mode-badge';
     $('modeBadge').textContent='ERROR';
     $('recommendationTitle').textContent='초기화 실패';
     $('recommendationReason').textContent=err.message;
