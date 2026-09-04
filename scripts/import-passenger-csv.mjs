@@ -1,6 +1,5 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { parse } from 'csv-parse/sync';
 
 const input = process.argv[2];
 const output = process.argv[3] || 'data/7016-passenger-profile.json';
@@ -12,26 +11,72 @@ if (!input) {
 
 function readTextAuto(file) {
   const buf = fs.readFileSync(file);
-  // 서울시 파일은 보통 CP949/EUC-KR 또는 UTF-8 계열이다.
-  // Node 기본 환경에서는 UTF-8을 우선하고 깨짐이 심하면 iconv-lite 없이도
-  // Windows에서 UTF-8로 저장 후 재실행하도록 명확히 오류를 낸다.
   const utf8 = buf.toString('utf8');
   const replacementRatio = (utf8.match(/�/g)?.length || 0) / Math.max(1, utf8.length);
   if (replacementRatio > 0.0005) {
-    throw new Error('CSV 인코딩이 UTF-8이 아닙니다. Excel/메모장에서 CSV UTF-8로 다시 저장한 뒤 실행해 주세요.');
+    throw new Error('CSV 인코딩이 UTF-8이 아닙니다. CSV UTF-8로 변환한 뒤 다시 실행해 주세요.');
   }
   return utf8.replace(/^\uFEFF/, '');
 }
 
+// 서울시 월간 CSV에는 일부 행의 따옴표가 엄격한 CSV 파서에서 오류를 내는 경우가 있다.
+// 한 행씩 독립적으로 읽는 관대한 파서를 사용해 정상 행은 최대한 보존한다.
+function splitCsvLine(line) {
+  const fields = [];
+  let current = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+
+    if (ch === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        current += '"';
+        i += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+
+    if (ch === ',' && !inQuotes) {
+      fields.push(current.trim());
+      current = '';
+      continue;
+    }
+
+    current += ch;
+  }
+
+  fields.push(current.trim());
+  return fields;
+}
+
 const text = readTextAuto(input);
-const rows = parse(text, {
-  columns: true,
-  skip_empty_lines: true,
-  relax_column_count: true,
-  relax_quotes: true,
-  skip_records_with_error: true,
-  trim: true,
-});
+const lines = text.split(/\r?\n/).filter(line => line.trim().length > 0);
+
+if (lines.length < 2) {
+  console.error('CSV에 데이터가 없습니다.');
+  process.exit(2);
+}
+
+const headers = splitCsvLine(lines[0]).map(h => h.trim());
+const rows = [];
+let skippedRows = 0;
+
+for (let i = 1; i < lines.length; i++) {
+  const values = splitCsvLine(lines[i]);
+  if (values.length < 4) {
+    skippedRows += 1;
+    continue;
+  }
+
+  const row = {};
+  for (let j = 0; j < headers.length; j++) {
+    row[headers[j]] = values[j] ?? '';
+  }
+  rows.push(row);
+}
 
 const norm = s => String(s ?? '')
   .normalize('NFKC')
@@ -39,7 +84,6 @@ const norm = s => String(s ?? '')
   .replace(/[()_\-]/g, '')
   .toLowerCase();
 
-const headers = rows.length ? Object.keys(rows[0]) : [];
 const headerNorm = new Map(headers.map(h => [h, norm(h)]));
 
 function pickHeader(patterns) {
@@ -54,7 +98,7 @@ const monthHeader = pickHeader([/사용년월/, /기준년월/, /useym/, /month/
 if (!routeHeader || !stopNameHeader) {
   console.error('헤더를 자동 인식하지 못했습니다.');
   console.error('인식된 헤더:', headers);
-  process.exit(2);
+  process.exit(3);
 }
 
 function hourFromHeader(h, kind) {
@@ -77,13 +121,14 @@ for (const h of headers) {
 if (!hourCols.length) {
   console.error('시간대별 승/하차 컬럼을 찾지 못했습니다.');
   console.error('인식된 헤더:', headers);
-  process.exit(3);
+  process.exit(4);
 }
 
 const routeRows = rows.filter(r => String(r[routeHeader] ?? '').trim() === '7016');
 if (!routeRows.length) {
   console.error('7016 행을 찾지 못했습니다.');
-  process.exit(4);
+  console.error(`전체 파싱 행: ${rows.length}, 건너뛴 행: ${skippedRows}`);
+  process.exit(5);
 }
 
 const byId = {};
@@ -124,11 +169,11 @@ for (const p of Object.values(byId)) {
     alight: Number((h.alight / Math.max(1, p.samples)).toFixed(2)),
     net: Number(((h.board - h.alight) / Math.max(1, p.samples)).toFixed(2)),
   }));
+
   const nk = norm(p.stopName);
   const existing = byName[nk];
   if (!existing) byName[nk] = p;
   else {
-    // 같은 이름 정류장이 양방향에 있을 때 이름 조회는 합산값으로 표시.
     existing.ambiguousName = true;
     for (let i = 0; i < 24; i++) {
       existing.hours[i].board += p.hours[i].board;
@@ -144,6 +189,7 @@ const result = {
   sourceMonth: month || null,
   route: '7016',
   rowCount: routeRows.length,
+  skippedRows,
   byId,
   byName,
 };
@@ -153,3 +199,4 @@ fs.writeFileSync(output, JSON.stringify(result, null, 2));
 console.log(`7016 승하차 프로필 생성 완료: ${output}`);
 console.log(`7016 원본 행: ${routeRows.length}`);
 console.log(`정류장 프로필: ${Object.keys(byId).length}`);
+console.log(`전체 파싱 행: ${rows.length}, 건너뛴 행: ${skippedRows}`);
