@@ -5,7 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="theme-color" content="#07100b" />
   <title>7016 · 상명대 통학</title>
-  <link rel="stylesheet" href="/styles.css?v=7.0" />
+  <link rel="stylesheet" href="/styles.css?v=7.1" />
+  <link rel="stylesheet" href="/layout-fix.css?v=7.1" />
 </head>
 <body>
   <main class="shell">
@@ -35,13 +36,13 @@
     <section class="controls panel" aria-label="통학 경로 설정">
       <div class="picker-field">
         <span class="field-label">승차 정류장</span>
-        <button id="boardingPickerButton" class="picker-button" type="button" aria-haspopup="listbox" aria-expanded="false">
+        <button id="boardingPickerButton" class="picker-button" type="button" aria-haspopup="listbox" aria-controls="boardingPickerMenu" aria-expanded="false">
           <span id="boardingPickerText">정류장 불러오는 중</span>
           <span class="chevron" aria-hidden="true">⌄</span>
         </button>
         <div id="boardingPickerMenu" class="picker-menu" hidden>
           <div class="picker-search-wrap">
-            <input id="boardingSearch" class="picker-search" type="search" placeholder="정류장명 또는 ARS 번호 검색" autocomplete="off" />
+            <input id="boardingSearch" class="picker-search" type="search" placeholder="정류장명 또는 ARS 번호 검색" autocomplete="off" aria-label="승차 정류장 검색" />
           </div>
           <div id="boardingOptions" class="picker-options" role="listbox" aria-label="승차 정류장 목록"></div>
         </div>
@@ -152,6 +153,6 @@
 
     <footer><span>7016 Campus Bus</span><span>서울시 버스 Open API · 월간 교통카드 승하차 데이터</span></footer>
   </main>
-  <script type="module" src="/app.js?v=7.0"></script>
+  <script type="module" src="/app.js?v=7.1"></script>
 </body>
 </html>
