@@ -106,40 +106,70 @@ function daysInMonth(sourceMonth) {
   if (mon < 1 || mon > 12) return 1;
   return new Date(Date.UTC(year, mon, 0)).getUTCDate();
 }
-function emptyProfile(stopId, stopName) {
+function emptyProfile(stopId, stopName, routeSeq = null) {
   return {
     stopId: String(stopId || ''),
     stopName: String(stopName || ''),
+    routeSeq: Number.isFinite(Number(routeSeq)) ? Number(routeSeq) : null,
     samples: 0,
     hours: Array.from({ length: 24 }, (_, hour) => ({ hour, board: 0, alight: 0, net: 0 }))
   };
 }
+function routeSeqFromStopName(stopName) {
+  const m = String(stopName || '').match(/\(\s*(\d{1,5})\s*\)\s*$/);
+  return m ? Number(m[1]) : null;
+}
+function addRowToProfile(profile, row) {
+  profile.samples += 1;
+  for (const hc of hourCols) {
+    const v = Number(String(row[hc.header] ?? '0').replace(/,/g, '')) || 0;
+    if (hc.kind === 'board') profile.hours[hc.hour].board += v;
+    else profile.hours[hc.hour].alight += v;
+  }
+}
+function normalizeDaily(profile, divisor) {
+  profile.hours = profile.hours.map(h => {
+    const board = Number((h.board / divisor).toFixed(2));
+    const alight = Number((h.alight / divisor).toFixed(2));
+    return { ...h, board, alight, net: Number((board - alight).toFixed(2)) };
+  });
+}
 function buildProfile(routeName, routeRows) {
   const byId = {};
+  const bySeq = {};
   let month = null;
   for (const row of routeRows) {
     const stopId = stopIdHeader ? String(row[stopIdHeader] ?? '').trim() : '';
     const stopName = String(row[stopNameHeader] ?? '').trim();
+    const routeSeq = routeSeqFromStopName(stopName);
     month ||= monthHeader ? String(row[monthHeader] ?? '').trim() : '';
-    const key = stopId || `name:${norm(stopName)}`;
-    const p = byId[key] ||= emptyProfile(stopId, stopName);
-    p.samples += 1;
-    for (const hc of hourCols) {
-      const v = Number(String(row[hc.header] ?? '0').replace(/,/g, '')) || 0;
-      if (hc.kind === 'board') p.hours[hc.hour].board += v;
-      else p.hours[hc.hour].alight += v;
+
+    const idKey = stopId || `name:${norm(stopName)}`;
+    const existingId = byId[idKey];
+    // Some circular village-bus routes visit the same physical stop more than
+    // once. The app's commute flow uses the earliest school-bound occurrence,
+    // so keep the lowest route sequence as the byId fallback. Exact occurrences
+    // are all preserved in bySeq below.
+    if (!existingId || (routeSeq != null && (existingId.routeSeq == null || routeSeq < existingId.routeSeq))) {
+      const idProfile = emptyProfile(stopId, stopName, routeSeq);
+      addRowToProfile(idProfile, row);
+      byId[idKey] = idProfile;
+    }
+
+    if (routeSeq != null) {
+      const seqKey = String(routeSeq);
+      const seqProfile = bySeq[seqKey] ||= emptyProfile(stopId, stopName, routeSeq);
+      addRowToProfile(seqProfile, row);
     }
   }
 
   const sourceDays = daysInMonth(month);
-  for (const p of Object.values(byId)) {
-    const divisor = Math.max(1, p.samples) * sourceDays;
-    p.hours = p.hours.map(h => {
-      const board = Number((h.board / divisor).toFixed(2));
-      const alight = Number((h.alight / divisor).toFixed(2));
-      return { ...h, board, alight, net: Number((board - alight).toFixed(2)) };
-    });
-  }
+  // byId keeps one deterministic school-bound occurrence per physical stop.
+  // bySeq below preserves every loop occurrence exactly.
+  for (const p of Object.values(byId)) normalizeDaily(p, Math.max(1, p.samples) * sourceDays);
+  // bySeq is the preferred exact route-occurrence lookup. If an upstream file
+  // unexpectedly repeats the same route sequence, average those duplicate rows.
+  for (const p of Object.values(bySeq)) normalizeDaily(p, Math.max(1, p.samples) * sourceDays);
 
   const byName = {};
   for (const p of Object.values(byId)) {
@@ -165,6 +195,7 @@ function buildProfile(routeName, routeRows) {
     rowCount: routeRows.length,
     skippedRows,
     byId,
+    bySeq,
     byName,
   };
 }
@@ -182,7 +213,7 @@ for (const routeName of TARGET_ROUTES) {
   fs.writeFileSync(output, JSON.stringify(result, null, 2));
   created += 1;
   console.log(`${routeName} 승하차 프로필 생성 완료: ${output}`);
-  console.log(`  원본 행 ${routeRows.length} · 정류장 ${Object.keys(result.byId).length} · ${result.sourceMonth || '월 미확인'} ${result.daysInMonth}일 기준`);
+  console.log(`  원본 행 ${routeRows.length} · 정류장 ${Object.keys(result.byId).length} · 노선순번 ${Object.keys(result.bySeq || {}).length} · ${result.sourceMonth || '월 미확인'} ${result.daysInMonth}일 기준`);
 }
 
 if (!created) {
