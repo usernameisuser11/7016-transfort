@@ -9,7 +9,7 @@ app.set('trust proxy', 1);
 
 const PORT = Number(process.env.PORT || 3000);
 const packageJson = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-const APP_VERSION = String(packageJson.version || '0.8.0');
+const APP_VERSION = String(packageJson.version || '0.9.0');
 const SERVICE_KEY = String(process.env.DATA_GO_KR_SERVICE_KEY || '').trim();
 const PASSENGER_PROFILE_FILE = process.env.PASSENGER_PROFILE_FILE || 'data/7016-passenger-profile.json';
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
@@ -18,6 +18,13 @@ const gemini = GEMINI_API_KEY ? new GoogleGenAI({ apiKey: GEMINI_API_KEY }) : nu
 const BUS_API = 'http://ws.bus.go.kr/api/rest';
 const SEOUL_TIME_ZONE = 'Asia/Seoul';
 const parser = new XMLParser({ ignoreAttributes: false, parseTagValue: false, trimValues: true });
+
+const ROUTES = {
+  '종로13': { label: '종로13', historical: false, suggested: /상명대입구|홍지파크/ },
+  '서대문08': { label: '서대문08', historical: false, suggested: /홍은초등학교|홍지문35통/ },
+  '7016': { label: '7016', historical: true, suggested: /경복궁역.*3번출구/ }
+};
+const ROUTE_LIST = Object.keys(ROUTES);
 
 app.use(express.json({ limit: '64kb' }));
 app.use('/api', (req, res, next) => {
@@ -34,7 +41,7 @@ app.use(express.static('public', {
   }
 }));
 
-const fallbackStops = JSON.parse(fs.readFileSync('data/7016-schoolbound-stops.json', 'utf8'));
+const fallback7016Stops = JSON.parse(fs.readFileSync('data/7016-schoolbound-stops.json', 'utf8'));
 let passengerProfile = null;
 
 function asArray(v) { return v == null ? [] : Array.isArray(v) ? v : [v]; }
@@ -51,6 +58,13 @@ function normName(s) {
     .replace(/\s+/g, '')
     .replace(/[()_\-]/g, '')
     .toLowerCase();
+}
+function normalizeRouteName(value) {
+  return String(value || '').replace(/\s+/g, '').toLowerCase();
+}
+function resolveRouteName(value) {
+  const normalized = normalizeRouteName(value || '7016');
+  return ROUTE_LIST.find(route => normalizeRouteName(route) === normalized) || null;
 }
 function seoulHour(date = new Date()) {
   const value = new Intl.DateTimeFormat('en-US', {
@@ -69,19 +83,12 @@ function daysInSourceMonth(sourceMonth) {
   return new Date(Date.UTC(year, month, 0)).getUTCDate();
 }
 function cloneProfile(p) {
-  return {
-    ...p,
-    hours: Array.isArray(p?.hours) ? p.hours.map(h => ({ ...h })) : []
-  };
+  return { ...p, hours: Array.isArray(p?.hours) ? p.hours.map(h => ({ ...h })) : [] };
 }
 
 function preparePassengerProfile(profile) {
   if (!profile || typeof profile !== 'object') return null;
   const byId = profile.byId || {};
-
-  // Legacy importer bug: byName referenced the first byId object directly, so
-  // duplicate stop names could mutate one direction's exact-ID profile into a
-  // two-direction aggregate. Repair those legacy exact profiles in memory.
   if (!profile.valueBasis) {
     const groups = new Map();
     for (const p of Object.values(byId)) {
@@ -105,9 +112,6 @@ function preparePassengerProfile(profile) {
       delete aggregate.ambiguousName;
     }
   }
-
-  // Always rebuild byName from independent clones so exact-ID data can never
-  // be changed by name aggregation.
   const byName = {};
   for (const p of Object.values(byId)) {
     const key = normName(p?.stopName);
@@ -127,7 +131,6 @@ function preparePassengerProfile(profile) {
   profile.byName = byName;
   return profile;
 }
-
 function reloadPassengerProfile() {
   try {
     const loaded = JSON.parse(fs.readFileSync(PASSENGER_PROFILE_FILE, 'utf8'));
@@ -161,16 +164,18 @@ async function busFetch(pathname, params = {}, ttlMs = 15000) {
   const url = `${BUS_API}/${pathname}?${qs}`;
   const cached = cacheGet(url, ttlMs);
   if (cached) return cached;
-  const res = await fetch(url, { headers: { 'User-Agent': `7016-campus-bus/${APP_VERSION}` } });
+  const res = await fetch(url, { headers: { 'User-Agent': `smu-campus-bus/${APP_VERSION}` } });
   if (!res.ok) throw new Error(`서울 버스 API HTTP ${res.status}`);
   const items = xmlItems(await res.text());
   cacheSet(url, items);
   return items;
 }
-async function get7016Route() {
-  const routes = await busFetch('busRouteInfo/getBusRouteList', { strSrch: '7016' }, 21600000);
-  const exact = routes.find(r => String(r.busRouteNm).trim() === '7016');
-  if (!exact) throw new Error('7016 노선을 찾지 못했습니다.');
+async function getRoute(routeName) {
+  const allowed = resolveRouteName(routeName);
+  if (!allowed) throw new Error('지원하지 않는 노선입니다.');
+  const routes = await busFetch('busRouteInfo/getBusRouteList', { strSrch: allowed }, 21600000);
+  const exact = routes.find(r => normalizeRouteName(r.busRouteNm) === normalizeRouteName(allowed));
+  if (!exact) throw new Error(`${allowed} 노선을 찾지 못했습니다.`);
   return exact;
 }
 async function getStations(routeId) {
@@ -184,9 +189,17 @@ async function getStations(routeId) {
     gpsY: toNumber(firstDefined(s.gpsY, s.tmY))
   })).sort((a, b) => a.seq - b.seq);
 }
-function schoolboundSlice(stations) {
-  const destIndex = stations.findIndex(s => /상명대정문/.test(s.stationNm));
-  return destIndex >= 0 ? stations.slice(0, destIndex + 1) : stations;
+function schoolDestinationSeqs(stations) {
+  return stations.filter(s => /상명대정문/.test(s.stationNm)).map(s => Number(s.seq)).filter(Number.isFinite).sort((a, b) => a - b);
+}
+function commuteStations(stations) {
+  const destinationSeqs = schoolDestinationSeqs(stations);
+  if (!destinationSeqs.length) throw new Error('이 노선에서 상명대정문 정류장을 찾지 못했습니다.');
+  const maxDestination = destinationSeqs.at(-1);
+  return { stations: stations.filter(s => s.seq <= maxDestination), destinationSeqs };
+}
+function nextDestinationSeq(destinationSeqs, boardOrd) {
+  return destinationSeqs.find(seq => seq > boardOrd) ?? null;
 }
 function normalizeArrival(a) {
   return {
@@ -243,8 +256,6 @@ function routeEstimateSeconds(stations, boardOrd, destOrd) {
   const stopGap = Math.max(1, destOrd - boardOrd);
   const distanceKm = routeDistanceKm(stations, boardOrd, destOrd);
   if (distanceKm == null) return stopGap * 115;
-  // Adjacent-stop straight-line distance is close enough for a conservative
-  // city-bus estimate. 15 km/h effective speed + short dwell allowance.
   const raw = (distanceKm / 15) * 3600 + stopGap * 20;
   return Math.round(clamp(raw, stopGap * 55, stopGap * 240));
 }
@@ -258,26 +269,19 @@ function estimateDestinationTravel(board, arrivals, idx, stations, boardOrd, des
   const vehId = idx === 1 ? board.vehId1 : board.vehId2;
   const boardEta = idx === 1 ? board.traTime1 : board.traTime2;
   if (!vehId || boardEta == null) return { seconds: routeEstimateSeconds(stations, boardOrd, destOrd), source: 'route-estimate' };
-
   const candidates = arrivals
     .filter(a => a.ord != null && a.ord > boardOrd && a.ord <= destOrd)
     .map(a => ({ ord: a.ord, eta: vehicleEtaAt(a, vehId) }))
     .filter(x => x.eta != null && x.eta >= boardEta)
     .sort((a, b) => a.ord - b.ord);
-
   const destinationMatch = candidates.find(x => x.ord === destOrd);
-  if (destinationMatch) {
-    return { seconds: Math.max(0, destinationMatch.eta - boardEta), source: 'vehicle-match' };
-  }
-
+  if (destinationMatch) return { seconds: Math.max(0, destinationMatch.eta - boardEta), source: 'vehicle-match' };
   const routeBase = routeEstimateSeconds(stations, boardOrd, destOrd);
   const farthest = candidates.at(-1);
   if (!farthest) return { seconds: routeBase, source: 'route-estimate' };
-
   const coveredStops = farthest.ord - boardOrd;
   const observedRide = Math.max(0, farthest.eta - boardEta);
   if (coveredStops <= 0 || observedRide <= 0) return { seconds: routeBase, source: 'route-estimate' };
-
   const secondsPerStop = clamp(observedRide / coveredStops, 50, 240);
   const remainingStops = Math.max(0, destOrd - farthest.ord);
   const extrapolated = observedRide + remainingStops * secondsPerStop;
@@ -322,19 +326,15 @@ function recommendation(first, second, historical) {
   return { action: 'TAKE_NOW', title: '이번 버스 타기', reason: `다음 차와 약 ${Math.max(1, Math.round(gap / 60))}분 차이라 지금 타는 편이 빠릅니다.${histNote}` };
 }
 
-function historicalForStation(station) {
+function historicalForStation(station, routeName) {
+  if (routeName !== '7016') return { available: false, routeUnsupported: true, routeName };
   if (!passengerProfile) return null;
   const byId = passengerProfile.byId || {};
   const byName = passengerProfile.byName || {};
   const exact = byId[String(station.station || '')];
   const named = byName[normName(station.stationNm)];
   const p = exact || named;
-  if (!p) return {
-    available: false,
-    sourceMonth: passengerProfile.sourceMonth || null,
-    sourceFile: passengerProfile.sourceFile || null
-  };
-
+  if (!p) return { available: false, sourceMonth: passengerProfile.sourceMonth || null, sourceFile: passengerProfile.sourceFile || null };
   const days = Number(passengerProfile.daysInMonth) || daysInSourceMonth(passengerProfile.sourceMonth) || 1;
   const divisor = passengerProfile.valueBasis === 'daily-average' ? 1 : days;
   const hours = (p.hours || []).map((x, hour) => {
@@ -364,55 +364,63 @@ function historicalForStation(station) {
   };
 }
 
-function demoPassenger(station) {
-  const hour = seoulHour();
-  const base = Math.max(3, 24 - Math.abs(hour - 9) * 2);
-  const factor = /경복궁|서울역|홍대|공덕/.test(station.stationNm) ? 1.45 : 1;
-  const board = Math.round(base * factor);
-  const alight = Math.max(1, Math.round(board * .35));
-  const hours = Array.from({ length: 24 }, (_, h) => {
-    const b = Math.max(1, Math.round((24 - Math.abs(h - 9) * 2) * factor));
-    return { hour: h, board: b, alight: Math.max(1, Math.round(b * .35)), net: Math.round(b * .65) };
-  });
-  return { available: true, demo: true, sourceMonth: 'DEMO', valueBasis: 'daily-average', hour, board, alight, net: board - alight, level: board > 25 ? 'high' : board > 12 ? 'medium' : 'low', hours };
+function suggestedBoarding(stations, destinationSeqs, routeName) {
+  const boardable = stations.filter(s => !/상명대정문/.test(s.stationNm) && nextDestinationSeq(destinationSeqs, s.seq) != null);
+  const regex = ROUTES[routeName]?.suggested;
+  const preferred = regex ? boardable.find(s => regex.test(s.stationNm)) : null;
+  if (preferred) return preferred;
+  const firstDestination = destinationSeqs[0];
+  const beforeFirst = boardable.filter(s => s.seq < firstDestination);
+  return beforeFirst[Math.max(0, beforeFirst.length - 4)] || boardable[0];
 }
 function demoBootstrap() {
   return {
     mode: 'demo',
+    routes: ROUTE_LIST,
+    selectedRoute: '7016',
     route: { busRouteId: 'DEMO-7016', busRouteNm: '7016', stStationNm: '은평공영차고지', edStationNm: '상명대정문', term: 9 },
-    stations: fallbackStops,
-    stopCount: fallbackStops.length,
-    suggestedBoardingSeq: fallbackStops.find(s => /경복궁역3번출구/.test(s.stationNm))?.seq || 47,
-    destinationSeq: fallbackStops.length,
+    stations: fallback7016Stops,
+    stopCount: fallback7016Stops.length,
+    suggestedBoardingSeq: fallback7016Stops.find(s => /경복궁역3번출구/.test(s.stationNm))?.seq || 47,
+    destinationSeq: fallback7016Stops.length,
+    destinationSeqs: [fallback7016Stops.length],
     passengerData: { available: Boolean(passengerProfile), sourceMonth: passengerProfile?.sourceMonth || null },
     geminiConfigured: Boolean(GEMINI_API_KEY)
   };
 }
 
 app.get('/api/bootstrap', async (req, res) => {
-  if (!SERVICE_KEY) return res.json(demoBootstrap());
+  const routeName = resolveRouteName(req.query.route || '7016');
+  if (!routeName) return res.status(400).json({ error: '지원하지 않는 노선입니다.' });
+  if (!SERVICE_KEY) {
+    if (routeName === '7016') return res.json(demoBootstrap());
+    return res.status(503).json({ error: `${routeName}은 실시간 API 연결이 필요합니다.` });
+  }
   try {
-    const route = await get7016Route();
+    const route = await getRoute(routeName);
     const all = await getStations(String(route.busRouteId));
-    const stations = schoolboundSlice(all);
-    const destination = stations.at(-1);
-    const suggested = stations.find(s => /경복궁역.*3번출구/.test(s.stationNm)) || stations[Math.max(0, stations.length - 8)];
+    const commute = commuteStations(all);
+    const suggested = suggestedBoarding(commute.stations, commute.destinationSeqs, routeName);
+    const initialDestination = suggested ? nextDestinationSeq(commute.destinationSeqs, suggested.seq) : commute.destinationSeqs[0];
     res.json({
       mode: 'live',
+      routes: ROUTE_LIST,
+      selectedRoute: routeName,
       route: {
         busRouteId: String(route.busRouteId),
-        busRouteNm: String(route.busRouteNm || '7016'),
+        busRouteNm: String(route.busRouteNm || routeName),
         stStationNm: String(route.stStationNm || ''),
         edStationNm: String(route.edStationNm || ''),
         term: toNumber(route.term),
         firstBusTm: String(route.firstBusTm || ''),
         lastBusTm: String(route.lastBusTm || '')
       },
-      stations,
-      stopCount: stations.length,
-      suggestedBoardingSeq: suggested?.seq ?? stations[0]?.seq,
-      destinationSeq: destination?.seq,
-      passengerData: { available: Boolean(passengerProfile), sourceMonth: passengerProfile?.sourceMonth || null },
+      stations: commute.stations,
+      stopCount: commute.stations.length,
+      suggestedBoardingSeq: suggested?.seq ?? commute.stations[0]?.seq,
+      destinationSeq: initialDestination,
+      destinationSeqs: commute.destinationSeqs,
+      passengerData: { available: routeName === '7016' && Boolean(passengerProfile), sourceMonth: routeName === '7016' ? passengerProfile?.sourceMonth || null : null },
       geminiConfigured: Boolean(GEMINI_API_KEY)
     });
   } catch (err) {
@@ -422,66 +430,63 @@ app.get('/api/bootstrap', async (req, res) => {
 });
 
 function demoDashboard(boardOrd, destOrd) {
-  const board = fallbackStops.find(s => s.seq === boardOrd) || fallbackStops[46];
-  const dest = fallbackStops.find(s => s.seq === destOrd) || fallbackStops.at(-1);
-  const hist = passengerProfile ? historicalForStation(board) : demoPassenger(board);
+  const board = fallback7016Stops.find(s => s.seq === boardOrd) || fallback7016Stops[46];
+  const dest = fallback7016Stops.find(s => s.seq === destOrd) || fallback7016Stops.at(-1);
+  const hist = passengerProfile ? historicalForStation(board, '7016') : null;
   const buses = [
     { index: 1, vehId: 'demo-1', plainNo: '서울74사7016', etaSec: 210, arrMsg: '약 3분 30초 후', congestion: { code: 4, label: '보통', level: 'normal' }, lowFloor: true, sectionOrd: Math.max(1, boardOrd - 2), destinationRideSec: 780, destinationEtaSec: 990, destinationEtaSource: 'vehicle-match' },
     { index: 2, vehId: 'demo-2', plainNo: '서울74사7716', etaSec: 690, arrMsg: '약 11분 30초 후', congestion: { code: 3, label: '여유', level: 'easy' }, lowFloor: true, sectionOrd: Math.max(1, boardOrd - 7), destinationRideSec: 760, destinationEtaSec: 1450, destinationEtaSource: 'route-estimate' }
   ];
   return {
-    mode: 'demo',
-    updatedAt: new Date().toISOString(),
+    mode: 'demo', routeName: '7016', updatedAt: new Date().toISOString(),
     boarding: { ord: boardOrd, station: board.station, stationNm: board.stationNm, arsId: board.arsId },
     destination: { ord: destOrd, stationNm: dest.stationNm, arsId: dest.arsId },
-    scheduledTermMin: 9,
-    actualHeadwayMin: 8,
-    buses,
-    recommendation: recommendation(buses[0], buses[1], hist),
-    runningBusCount: 24,
-    historical: hist
+    scheduledTermMin: 9, actualHeadwayMin: 8, buses,
+    recommendation: recommendation(buses[0], buses[1], hist), runningBusCount: 24, historical: hist
   };
 }
 
 app.get('/api/dashboard', async (req, res) => {
+  const routeName = resolveRouteName(req.query.route || '7016');
   const boardOrd = Number(req.query.boardOrd);
-  const destOrd = Number(req.query.destOrd);
-  if (!Number.isFinite(boardOrd) || !Number.isFinite(destOrd)) return res.status(400).json({ error: 'boardOrd와 destOrd가 필요합니다.' });
-  if (boardOrd >= destOrd) return res.status(400).json({ error: '승차 정류장은 상명대정문보다 앞에 있어야 합니다.' });
-  if (!SERVICE_KEY) return res.json(demoDashboard(boardOrd, destOrd));
-
+  if (!routeName) return res.status(400).json({ error: '지원하지 않는 노선입니다.' });
+  if (!Number.isFinite(boardOrd)) return res.status(400).json({ error: 'boardOrd가 필요합니다.' });
+  if (!SERVICE_KEY) {
+    const destOrd = Number(req.query.destOrd);
+    if (routeName === '7016' && Number.isFinite(destOrd)) return res.json(demoDashboard(boardOrd, destOrd));
+    return res.status(503).json({ error: '실시간 API 연결이 필요합니다.' });
+  }
   try {
-    const route = await get7016Route();
+    const route = await getRoute(routeName);
     const routeId = String(route.busRouteId);
     const [allStations, arrivalRows, positionRows] = await Promise.all([
       getStations(routeId),
       busFetch('arrive/getArrInfoByRouteAll', { busRouteId: routeId }, 10000),
       busFetch('buspos/getBusPosByRtid', { busRouteId: routeId }, 10000)
     ]);
-    const stations = schoolboundSlice(allStations);
+    const commute = commuteStations(allStations);
+    const destOrd = nextDestinationSeq(commute.destinationSeqs, boardOrd);
+    if (destOrd == null) throw new Error('선택한 정류장 이후에 상명대정문 정류장이 없습니다.');
     const arrivals = arrivalRows.map(normalizeArrival);
     const activePositions = positionRows.filter(p => String(firstDefined(p.isrunyn, '1')) !== '0');
-    const boardingStation = stations.find(s => s.seq === boardOrd);
-    const destinationStation = stations.find(s => s.seq === destOrd);
-    if (!boardingStation || !destinationStation) throw new Error('선택한 정류장을 학교 방향 노선에서 찾지 못했습니다.');
+    const boardingStation = commute.stations.find(s => s.seq === boardOrd);
+    const destinationStation = commute.stations.find(s => s.seq === destOrd);
+    if (!boardingStation || !destinationStation) throw new Error('선택한 정류장을 상명대 방향 구간에서 찾지 못했습니다.');
     const board = arrivals.find(a => (a.ord != null && a.ord === boardOrd) || a.stId === boardingStation.station);
     if (!board) throw new Error('선택한 승차 정류장의 도착정보를 찾지 못했습니다.');
-
-    const bus1 = makeBusCard(board, arrivals, activePositions, 1, stations, boardOrd, destOrd);
-    const bus2 = makeBusCard(board, arrivals, activePositions, 2, stations, boardOrd, destOrd);
+    const segmentStations = commute.stations.filter(s => s.seq >= boardOrd && s.seq <= destOrd);
+    const bus1 = makeBusCard(board, arrivals, activePositions, 1, segmentStations, boardOrd, destOrd);
+    const bus2 = makeBusCard(board, arrivals, activePositions, 2, segmentStations, boardOrd, destOrd);
     const gap = bus1.etaSec != null && bus2.etaSec != null ? Math.max(0, bus2.etaSec - bus1.etaSec) : null;
-    const historical = historicalForStation(boardingStation);
+    const historical = historicalForStation(boardingStation, routeName);
     res.json({
-      mode: 'live',
-      updatedAt: new Date().toISOString(),
+      mode: 'live', routeName, updatedAt: new Date().toISOString(),
       boarding: { ord: boardOrd, station: boardingStation.station, stationNm: boardingStation.stationNm, arsId: boardingStation.arsId },
       destination: { ord: destOrd, stationNm: destinationStation.stationNm, arsId: destinationStation.arsId },
       scheduledTermMin: board.term ?? toNumber(route.term),
       actualHeadwayMin: gap == null ? null : Math.round(gap / 60),
-      buses: [bus1, bus2],
-      recommendation: recommendation(bus1, bus2, historical),
-      runningBusCount: activePositions.length,
-      historical
+      buses: [bus1, bus2], recommendation: recommendation(bus1, bus2, historical),
+      runningBusCount: activePositions.length, historical
     });
   } catch (err) {
     console.error(err);
@@ -501,9 +506,7 @@ function aiRequestAllowed(req) {
   recent.push(now);
   aiRateLimit.set(key, recent);
   if (aiRateLimit.size > 300) {
-    for (const [k, times] of aiRateLimit) {
-      if (!times.some(t => now - t < windowMs)) aiRateLimit.delete(k);
-    }
+    for (const [k, times] of aiRateLimit) if (!times.some(t => now - t < windowMs)) aiRateLimit.delete(k);
   }
   return true;
 }
@@ -517,20 +520,15 @@ function safeAiContext(body = {}) {
   });
   const h = body.historical || null;
   return {
+    route: String(body.routeName || '7016').slice(0, 20),
     boarding: String(body?.boarding?.stationNm || '').slice(0, 80),
     destination: String(body?.destination?.stationNm || '').slice(0, 80),
     scheduledTermMin: toNumber(body.scheduledTermMin),
     actualHeadwayMin: toNumber(body.actualHeadwayMin),
-    firstBus: bus(body?.buses?.[0]),
-    secondBus: bus(body?.buses?.[1]),
+    firstBus: bus(body?.buses?.[0]), secondBus: bus(body?.buses?.[1]),
     historical: h ? {
-      available: Boolean(h.available),
-      hour: toNumber(h.hour),
-      averageBoard: toNumber(h.board),
-      averageAlight: toNumber(h.alight),
-      demandLevel: String(h.level || '').slice(0, 20),
-      sourceMonth: String(h.sourceMonth || '').slice(0, 30),
-      demo: Boolean(h.demo),
+      available: Boolean(h.available), hour: toNumber(h.hour), averageBoard: toNumber(h.board), averageAlight: toNumber(h.alight),
+      demandLevel: String(h.level || '').slice(0, 20), sourceMonth: String(h.sourceMonth || '').slice(0, 30), demo: Boolean(h.demo),
     } : null,
     ruleRecommendation: {
       action: String(body?.recommendation?.action || '').slice(0, 30),
@@ -542,12 +540,10 @@ function safeAiContext(body = {}) {
 }
 function fallbackAiAdvice(ctx) {
   const action = ctx.ruleRecommendation.action || 'NEUTRAL';
-  const firstCong = ctx.firstBus.congestion;
-  const secondCong = ctx.secondBus.congestion;
   return {
     decision: action === 'WAIT_NEXT' ? 'WAIT_NEXT' : action === 'TAKE_NOW' ? 'TAKE_NOW' : 'NEUTRAL',
     headline: ctx.ruleRecommendation.title || '현재 데이터 기준으로 판단하세요',
-    reason: ctx.ruleRecommendation.reason || `첫 차 ${firstCong}, 다음 차 ${secondCong} 상태입니다.`,
+    reason: ctx.ruleRecommendation.reason || '현재 실시간 도착정보를 기준으로 판단했습니다.',
     risk: 'Gemini 응답을 사용할 수 없어 기존 규칙 기반 판단을 표시합니다.',
     tip: '실시간 도착정보는 계속 갱신되므로 탑승 직전에 한 번 더 확인하세요.',
     source: 'rule-fallback',
@@ -558,48 +554,30 @@ async function getGeminiAdvice(ctx) {
   const cacheKey = JSON.stringify(ctx);
   const cached = aiAdviceCache.get(cacheKey);
   if (cached && Date.now() - cached.at < 3 * 60 * 1000) return cached.value;
-
   const schema = {
     type: 'object',
     properties: {
-      decision: { type: 'string', enum: ['TAKE_NOW', 'WAIT_NEXT', 'NEUTRAL'], description: '추천 행동' },
-      headline: { type: 'string', description: '20자 안팎의 매우 짧은 한국어 결론' },
-      reason: { type: 'string', description: '실시간 ETA, 배차, 혼잡도, 과거 수요 중 실제 제공된 수치를 근거로 한 1~2문장 설명' },
-      risk: { type: 'string', description: '불확실성 또는 주의점 한 문장' },
-      tip: { type: 'string', description: '사용자가 바로 행동할 수 있는 짧은 팁 한 문장' }
+      decision: { type: 'string', enum: ['TAKE_NOW', 'WAIT_NEXT', 'NEUTRAL'] },
+      headline: { type: 'string' }, reason: { type: 'string' }, risk: { type: 'string' }, tip: { type: 'string' }
     },
     required: ['decision', 'headline', 'reason', 'risk', 'tip']
   };
   const prompt = [
-    '너는 서울 7016번 버스로 상명대학교에 통학하는 사람을 돕는 교통 의사결정 보조 AI다.',
-    '아래 데이터만 사용해서 지금 오는 첫 번째 버스를 탈지, 다음 버스를 기다릴지 판단하라.',
-    '규칙:',
-    '1. 없는 사실이나 승객 수를 만들어내지 말 것.',
-    '2. 실시간 차량 혼잡도가 있으면 과거 승하차 평균보다 우선할 것.',
-    '3. 과거 승하차 데이터가 DEMO이면 판단 근거로 강하게 사용하지 말 것.',
-    '4. 상명대 도착 ETA의 source가 vehicle-match가 아니면 추정치라는 점을 risk에 밝힐 것.',
-    '5. 두 차량의 시간 차이가 크면 시간 절약을 우선하고, 차이가 작고 첫 차가 혼잡하면 쾌적함을 고려할 것.',
-    '6. 기존 ruleRecommendation을 참고하되 그대로 복사할 필요는 없다.',
-    '7. 답변은 짧고 자연스러운 한국어로 할 것.',
-    '',
+    '너는 상명대학교 서울캠퍼스 통학 버스 의사결정 보조 AI다.',
+    `선택 노선은 ${ctx.route}이다. 아래 데이터만 사용해 첫 번째 버스를 탈지 다음 버스를 기다릴지 판단하라.`,
+    '없는 사실을 만들지 말고 실시간 데이터가 있으면 과거 통계보다 우선하라.',
+    '상명대 도착 ETA source가 vehicle-match가 아니면 추정치임을 risk에 밝혀라.',
+    '답변은 짧고 자연스러운 한국어로 하라.',
     JSON.stringify(ctx)
   ].join('\n');
-
   try {
-    const interaction = await gemini.interactions.create({
-      model: GEMINI_MODEL,
-      input: prompt,
-      response_format: { type: 'text', mime_type: 'application/json', schema }
-    });
+    const interaction = await gemini.interactions.create({ model: GEMINI_MODEL, input: prompt, response_format: { type: 'text', mime_type: 'application/json', schema } });
     const parsed = JSON.parse(interaction.output_text || '{}');
     const value = {
       decision: ['TAKE_NOW', 'WAIT_NEXT', 'NEUTRAL'].includes(parsed.decision) ? parsed.decision : 'NEUTRAL',
       headline: String(parsed.headline || 'AI 분석 완료').slice(0, 100),
-      reason: String(parsed.reason || '').slice(0, 500),
-      risk: String(parsed.risk || '').slice(0, 300),
-      tip: String(parsed.tip || '').slice(0, 300),
-      source: 'gemini',
-      model: GEMINI_MODEL,
+      reason: String(parsed.reason || '').slice(0, 500), risk: String(parsed.risk || '').slice(0, 300), tip: String(parsed.tip || '').slice(0, 300),
+      source: 'gemini', model: GEMINI_MODEL,
     };
     aiAdviceCache.set(cacheKey, { at: Date.now(), value });
     if (aiAdviceCache.size > 80) aiAdviceCache.delete(aiAdviceCache.keys().next().value);
@@ -609,7 +587,6 @@ async function getGeminiAdvice(ctx) {
     return { ...fallbackAiAdvice(ctx), risk: 'Gemini 호출 오류로 기존 규칙 기반 판단을 표시합니다.', errorCode: 'GEMINI_CALL_FAILED' };
   }
 }
-
 app.post('/api/ai-advice', async (req, res) => {
   if (!aiRequestAllowed(req)) return res.status(429).json({ error: 'AI 분석 요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.' });
   const ctx = safeAiContext(req.body || {});
@@ -625,8 +602,9 @@ app.post('/api/reload-passenger-profile', (req, res) => {
 });
 app.get('/api/health', (req, res) => res.json({
   ok: true,
-  service: '7016-campus-bus',
+  service: 'smu-campus-bus',
   version: APP_VERSION,
+  routes: ROUTE_LIST,
   timeZone: SEOUL_TIME_ZONE,
   liveApiConfigured: Boolean(SERVICE_KEY),
   passengerProfileLoaded: Boolean(passengerProfile),
@@ -637,7 +615,8 @@ app.get('/api/health', (req, res) => res.json({
 }));
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`7016 Campus Bus v${APP_VERSION}: http://localhost:${PORT}`);
-  console.log(`정류장 fallback: ${fallbackStops.length}개`);
+  console.log(`SMU Campus Bus v${APP_VERSION}: http://localhost:${PORT}`);
+  console.log(`지원 노선: ${ROUTE_LIST.join(', ')}`);
+  console.log(`7016 정류장 fallback: ${fallback7016Stops.length}개`);
   console.log(`승하차 프로필: ${passengerProfile ? 'loaded' : 'not loaded'}`);
 });
