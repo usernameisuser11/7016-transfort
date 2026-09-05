@@ -2,10 +2,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const input = process.argv[2];
-const output = process.argv[3] || 'data/7016-passenger-profile.json';
+const outputDir = process.argv[3] || 'data';
+const TARGET_ROUTES = ['7016', '종로13', '서대문08'];
 
 if (!input) {
-  console.error('사용법: npm run import:passengers -- <서울시 승하차 CSV> [출력 JSON]');
+  console.error('사용법: npm run import:passengers -- <서울시 승하차 CSV> [출력 디렉토리]');
   process.exit(1);
 }
 
@@ -19,29 +20,18 @@ function readTextAuto(file) {
   return utf8.replace(/^\uFEFF/, '');
 }
 
-// 서울시 월간 CSV에는 일부 행의 따옴표가 엄격한 CSV 파서에서 오류를 내는 경우가 있다.
-// 한 행씩 독립적으로 읽는 관대한 파서를 사용해 정상 행은 최대한 보존한다.
 function splitCsvLine(line) {
   const fields = [];
   let current = '';
   let inQuotes = false;
-
   for (let i = 0; i < line.length; i++) {
     const ch = line[i];
     if (ch === '"') {
-      if (inQuotes && line[i + 1] === '"') {
-        current += '"';
-        i += 1;
-      } else {
-        inQuotes = !inQuotes;
-      }
+      if (inQuotes && line[i + 1] === '"') { current += '"'; i += 1; }
+      else inQuotes = !inQuotes;
       continue;
     }
-    if (ch === ',' && !inQuotes) {
-      fields.push(current.trim());
-      current = '';
-      continue;
-    }
+    if (ch === ',' && !inQuotes) { fields.push(current.trim()); current = ''; continue; }
     current += ch;
   }
   fields.push(current.trim());
@@ -58,13 +48,9 @@ if (lines.length < 2) {
 const headers = splitCsvLine(lines[0]).map(h => h.trim());
 const rows = [];
 let skippedRows = 0;
-
 for (let i = 1; i < lines.length; i++) {
   const values = splitCsvLine(lines[i]);
-  if (values.length < 4) {
-    skippedRows += 1;
-    continue;
-  }
+  if (values.length < 4) { skippedRows += 1; continue; }
   const row = {};
   for (let j = 0; j < headers.length; j++) row[headers[j]] = values[j] ?? '';
   rows.push(row);
@@ -76,17 +62,16 @@ const norm = s => String(s ?? '')
   .replace(/\s+/g, '')
   .replace(/[()_\-]/g, '')
   .toLowerCase();
+const normRoute = s => String(s ?? '').normalize('NFKC').replace(/\s+/g, '').toLowerCase();
 
 const headerNorm = new Map(headers.map(h => [h, norm(h)]));
 function pickHeader(patterns) {
   return headers.find(h => patterns.some(p => p.test(headerNorm.get(h))));
 }
-
 const routeHeader = pickHeader([/노선번호/, /^노선$/, /busroute(no|nm|name)?/]);
 const stopIdHeader = pickHeader([/표준버스정류장(id|아이디)/, /정류장(id|아이디)/, /stationid/]);
 const stopNameHeader = pickHeader([/정류장명/, /^역명$/, /stationname/, /stationnm/]);
 const monthHeader = pickHeader([/사용년월/, /기준년월/, /useym/, /month/]);
-
 if (!routeHeader || !stopNameHeader) {
   console.error('헤더를 자동 인식하지 못했습니다.');
   console.error('인식된 헤더:', headers);
@@ -101,7 +86,6 @@ function hourFromHeader(h, kind) {
   const hour = Number(m[1]);
   return hour >= 0 && hour <= 23 ? hour : null;
 }
-
 const hourCols = [];
 for (const h of headers) {
   const boardHour = hourFromHeader(h, '승차');
@@ -109,44 +93,9 @@ for (const h of headers) {
   const alightHour = hourFromHeader(h, '하차');
   if (alightHour != null) hourCols.push({ header: h, hour: alightHour, kind: 'alight' });
 }
-
 if (!hourCols.length) {
   console.error('시간대별 승/하차 컬럼을 찾지 못했습니다.');
-  console.error('인식된 헤더:', headers);
   process.exit(4);
-}
-
-const routeRows = rows.filter(r => String(r[routeHeader] ?? '').trim() === '7016');
-if (!routeRows.length) {
-  console.error('7016 행을 찾지 못했습니다.');
-  console.error(`전체 파싱 행: ${rows.length}, 건너뛴 행: ${skippedRows}`);
-  process.exit(5);
-}
-
-const byId = {};
-let month = null;
-function emptyProfile(stopId, stopName) {
-  return {
-    stopId: String(stopId || ''),
-    stopName: String(stopName || ''),
-    samples: 0,
-    hours: Array.from({ length: 24 }, (_, hour) => ({ hour, board: 0, alight: 0, net: 0 }))
-  };
-}
-
-for (const row of routeRows) {
-  const stopId = stopIdHeader ? String(row[stopIdHeader] ?? '').trim() : '';
-  const stopName = String(row[stopNameHeader] ?? '').trim();
-  month ||= monthHeader ? String(row[monthHeader] ?? '').trim() : '';
-  const key = stopId || `name:${norm(stopName)}`;
-  const p = byId[key] ||= emptyProfile(stopId, stopName);
-  p.samples += 1;
-
-  for (const hc of hourCols) {
-    const v = Number(String(row[hc.header] ?? '0').replace(/,/g, '')) || 0;
-    if (hc.kind === 'board') p.hours[hc.hour].board += v;
-    else p.hours[hc.hour].alight += v;
-  }
 }
 
 function daysInMonth(sourceMonth) {
@@ -157,53 +106,87 @@ function daysInMonth(sourceMonth) {
   if (mon < 1 || mon > 12) return 1;
   return new Date(Date.UTC(year, mon, 0)).getUTCDate();
 }
+function emptyProfile(stopId, stopName) {
+  return {
+    stopId: String(stopId || ''),
+    stopName: String(stopName || ''),
+    samples: 0,
+    hours: Array.from({ length: 24 }, (_, hour) => ({ hour, board: 0, alight: 0, net: 0 }))
+  };
+}
+function buildProfile(routeName, routeRows) {
+  const byId = {};
+  let month = null;
+  for (const row of routeRows) {
+    const stopId = stopIdHeader ? String(row[stopIdHeader] ?? '').trim() : '';
+    const stopName = String(row[stopNameHeader] ?? '').trim();
+    month ||= monthHeader ? String(row[monthHeader] ?? '').trim() : '';
+    const key = stopId || `name:${norm(stopName)}`;
+    const p = byId[key] ||= emptyProfile(stopId, stopName);
+    p.samples += 1;
+    for (const hc of hourCols) {
+      const v = Number(String(row[hc.header] ?? '0').replace(/,/g, '')) || 0;
+      if (hc.kind === 'board') p.hours[hc.hour].board += v;
+      else p.hours[hc.hour].alight += v;
+    }
+  }
 
-const sourceDays = daysInMonth(month);
-for (const p of Object.values(byId)) {
-  const divisor = Math.max(1, p.samples) * sourceDays;
-  p.hours = p.hours.map(h => {
-    const board = Number((h.board / divisor).toFixed(2));
-    const alight = Number((h.alight / divisor).toFixed(2));
-    return { ...h, board, alight, net: Number((board - alight).toFixed(2)) };
-  });
+  const sourceDays = daysInMonth(month);
+  for (const p of Object.values(byId)) {
+    const divisor = Math.max(1, p.samples) * sourceDays;
+    p.hours = p.hours.map(h => {
+      const board = Number((h.board / divisor).toFixed(2));
+      const alight = Number((h.alight / divisor).toFixed(2));
+      return { ...h, board, alight, net: Number((board - alight).toFixed(2)) };
+    });
+  }
+
+  const byName = {};
+  for (const p of Object.values(byId)) {
+    const nk = norm(p.stopName);
+    const copy = { ...p, hours: p.hours.map(h => ({ ...h })) };
+    const existing = byName[nk];
+    if (!existing) { byName[nk] = copy; continue; }
+    existing.ambiguousName = true;
+    for (let i = 0; i < 24; i++) {
+      const board = Number((Number(existing.hours[i]?.board || 0) + Number(copy.hours[i]?.board || 0)).toFixed(2));
+      const alight = Number((Number(existing.hours[i]?.alight || 0) + Number(copy.hours[i]?.alight || 0)).toFixed(2));
+      existing.hours[i] = { hour: i, board, alight, net: Number((board - alight).toFixed(2)) };
+    }
+  }
+
+  return {
+    generatedAt: new Date().toISOString(),
+    sourceFile: path.basename(input),
+    sourceMonth: month || null,
+    daysInMonth: sourceDays,
+    valueBasis: 'daily-average',
+    route: routeName,
+    rowCount: routeRows.length,
+    skippedRows,
+    byId,
+    byName,
+  };
 }
 
-// Build name lookup from clones. Never point byName directly at a byId object:
-// otherwise aggregating a duplicate stop name corrupts exact-ID direction data.
-const byName = {};
-for (const p of Object.values(byId)) {
-  const nk = norm(p.stopName);
-  const copy = { ...p, hours: p.hours.map(h => ({ ...h })) };
-  const existing = byName[nk];
-  if (!existing) {
-    byName[nk] = copy;
+fs.mkdirSync(outputDir, { recursive: true });
+let created = 0;
+for (const routeName of TARGET_ROUTES) {
+  const routeRows = rows.filter(r => normRoute(r[routeHeader]) === normRoute(routeName));
+  if (!routeRows.length) {
+    console.warn(`${routeName}: CSV에서 행을 찾지 못해 건너뜁니다.`);
     continue;
   }
-  existing.ambiguousName = true;
-  for (let i = 0; i < 24; i++) {
-    const board = Number((Number(existing.hours[i]?.board || 0) + Number(copy.hours[i]?.board || 0)).toFixed(2));
-    const alight = Number((Number(existing.hours[i]?.alight || 0) + Number(copy.hours[i]?.alight || 0)).toFixed(2));
-    existing.hours[i] = { hour: i, board, alight, net: Number((board - alight).toFixed(2)) };
-  }
+  const result = buildProfile(routeName, routeRows);
+  const output = path.join(outputDir, `${routeName}-passenger-profile.json`);
+  fs.writeFileSync(output, JSON.stringify(result, null, 2));
+  created += 1;
+  console.log(`${routeName} 승하차 프로필 생성 완료: ${output}`);
+  console.log(`  원본 행 ${routeRows.length} · 정류장 ${Object.keys(result.byId).length} · ${result.sourceMonth || '월 미확인'} ${result.daysInMonth}일 기준`);
 }
 
-const result = {
-  generatedAt: new Date().toISOString(),
-  sourceFile: path.basename(input),
-  sourceMonth: month || null,
-  daysInMonth: sourceDays,
-  valueBasis: 'daily-average',
-  route: '7016',
-  rowCount: routeRows.length,
-  skippedRows,
-  byId,
-  byName,
-};
-
-fs.mkdirSync(path.dirname(output), { recursive: true });
-fs.writeFileSync(output, JSON.stringify(result, null, 2));
-console.log(`7016 승하차 프로필 생성 완료: ${output}`);
-console.log(`7016 원본 행: ${routeRows.length}`);
-console.log(`정류장 프로필: ${Object.keys(byId).length}`);
-console.log(`기준: ${month || '월 미확인'} / ${sourceDays}일 / 시간대별 일평균`);
-console.log(`전체 파싱 행: ${rows.length}, 건너뛴 행: ${skippedRows}`);
+if (!created) {
+  console.error(`대상 노선(${TARGET_ROUTES.join(', ')}) 데이터를 찾지 못했습니다.`);
+  process.exit(5);
+}
+console.log(`전체 파싱 행: ${rows.length}, 건너뛴 행: ${skippedRows}, 생성 프로필: ${created}/${TARGET_ROUTES.length}`);
