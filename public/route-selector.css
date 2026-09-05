@@ -42,6 +42,7 @@
   .route-list{min-width:0;width:100%}
 }
 @media(max-width:420px){
-  .route-list{grid-template-columns:1fr}
-  .route-choice{min-height:44px;text-align:left;padding-left:16px}
+  .route-selector{padding:14px}
+  .route-list{grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+  .route-choice{min-height:44px;padding:0 7px;font-size:13px}
 }
