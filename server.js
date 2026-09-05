@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import express from 'express';
 import fs from 'node:fs';
+import path from 'node:path';
 import { XMLParser } from 'fast-xml-parser';
 import { GoogleGenAI } from '@google/genai';
 
@@ -9,9 +10,10 @@ app.set('trust proxy', 1);
 
 const PORT = Number(process.env.PORT || 3000);
 const packageJson = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-const APP_VERSION = String(packageJson.version || '0.9.0');
+const APP_VERSION = String(packageJson.version || '0.9.1');
 const SERVICE_KEY = String(process.env.DATA_GO_KR_SERVICE_KEY || '').trim();
-const PASSENGER_PROFILE_FILE = process.env.PASSENGER_PROFILE_FILE || 'data/7016-passenger-profile.json';
+const PASSENGER_PROFILE_DIR = process.env.PASSENGER_PROFILE_DIR || 'data';
+const LEGACY_PASSENGER_PROFILE_FILE = process.env.PASSENGER_PROFILE_FILE || 'data/7016-passenger-profile.json';
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
 const gemini = GEMINI_API_KEY ? new GoogleGenAI({ apiKey: GEMINI_API_KEY }) : null;
@@ -20,9 +22,9 @@ const SEOUL_TIME_ZONE = 'Asia/Seoul';
 const parser = new XMLParser({ ignoreAttributes: false, parseTagValue: false, trimValues: true });
 
 const ROUTES = {
-  '종로13': { label: '종로13', historical: false, suggested: /상명대입구|홍지파크/ },
-  '서대문08': { label: '서대문08', historical: false, suggested: /홍은초등학교|홍지문35통/ },
-  '7016': { label: '7016', historical: true, suggested: /경복궁역.*3번출구/ }
+  '종로13': { label: '종로13', suggested: /상명대입구|홍지파크/ },
+  '서대문08': { label: '서대문08', suggested: /홍은초등학교|홍지문35통/ },
+  '7016': { label: '7016', suggested: /경복궁역.*3번출구/ }
 };
 const ROUTE_LIST = Object.keys(ROUTES);
 
@@ -42,7 +44,7 @@ app.use(express.static('public', {
 }));
 
 const fallback7016Stops = JSON.parse(fs.readFileSync('data/7016-schoolbound-stops.json', 'utf8'));
-let passengerProfile = null;
+const passengerProfiles = new Map();
 
 function asArray(v) { return v == null ? [] : Array.isArray(v) ? v : [v]; }
 function firstDefined(...v) { return v.find(x => x !== undefined && x !== null && x !== ''); }
@@ -60,7 +62,7 @@ function normName(s) {
     .toLowerCase();
 }
 function normalizeRouteName(value) {
-  return String(value || '').replace(/\s+/g, '').toLowerCase();
+  return String(value || '').normalize('NFKC').replace(/\s+/g, '').toLowerCase();
 }
 function resolveRouteName(value) {
   const normalized = normalizeRouteName(value || '7016');
@@ -89,6 +91,7 @@ function cloneProfile(p) {
 function preparePassengerProfile(profile) {
   if (!profile || typeof profile !== 'object') return null;
   const byId = profile.byId || {};
+
   if (!profile.valueBasis) {
     const groups = new Map();
     for (const p of Object.values(byId)) {
@@ -112,6 +115,7 @@ function preparePassengerProfile(profile) {
       delete aggregate.ambiguousName;
     }
   }
+
   const byName = {};
   for (const p of Object.values(byId)) {
     const key = normName(p?.stopName);
@@ -131,16 +135,40 @@ function preparePassengerProfile(profile) {
   profile.byName = byName;
   return profile;
 }
-function reloadPassengerProfile() {
-  try {
-    const loaded = JSON.parse(fs.readFileSync(PASSENGER_PROFILE_FILE, 'utf8'));
-    passengerProfile = preparePassengerProfile(loaded);
-  } catch (err) {
-    console.error('Passenger profile load error:', err.message);
-    passengerProfile = null;
+
+function passengerProfileCandidates(routeName) {
+  const routeFile = path.join(PASSENGER_PROFILE_DIR, `${routeName}-passenger-profile.json`);
+  if (routeName !== '7016') return [routeFile];
+  return [...new Set([routeFile, LEGACY_PASSENGER_PROFILE_FILE])];
+}
+function reloadPassengerProfiles() {
+  passengerProfiles.clear();
+  for (const routeName of ROUTE_LIST) {
+    let loaded = null;
+    let loadedFrom = null;
+    for (const file of passengerProfileCandidates(routeName)) {
+      try {
+        if (!fs.existsSync(file)) continue;
+        const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
+        const declaredRoute = resolveRouteName(raw?.route || routeName);
+        if (declaredRoute && declaredRoute !== routeName) continue;
+        loaded = preparePassengerProfile(raw);
+        loadedFrom = file;
+        break;
+      } catch (err) {
+        console.error(`Passenger profile load error (${routeName}, ${file}):`, err.message);
+      }
+    }
+    if (loaded) {
+      loaded.loadedFrom = loadedFrom;
+      passengerProfiles.set(routeName, loaded);
+    }
   }
 }
-reloadPassengerProfile();
+function passengerProfileForRoute(routeName) {
+  return passengerProfiles.get(routeName) || null;
+}
+reloadPassengerProfiles();
 
 const cache = new Map();
 function cacheGet(key, ttlMs) {
@@ -327,16 +355,16 @@ function recommendation(first, second, historical) {
 }
 
 function historicalForStation(station, routeName) {
-  if (routeName !== '7016') return { available: false, routeUnsupported: true, routeName };
-  if (!passengerProfile) return null;
-  const byId = passengerProfile.byId || {};
-  const byName = passengerProfile.byName || {};
+  const profile = passengerProfileForRoute(routeName);
+  if (!profile) return { available: false, routeUnsupported: true, routeName };
+  const byId = profile.byId || {};
+  const byName = profile.byName || {};
   const exact = byId[String(station.station || '')];
   const named = byName[normName(station.stationNm)];
   const p = exact || named;
-  if (!p) return { available: false, sourceMonth: passengerProfile.sourceMonth || null, sourceFile: passengerProfile.sourceFile || null };
-  const days = Number(passengerProfile.daysInMonth) || daysInSourceMonth(passengerProfile.sourceMonth) || 1;
-  const divisor = passengerProfile.valueBasis === 'daily-average' ? 1 : days;
+  if (!p) return { available: false, sourceMonth: profile.sourceMonth || null, sourceFile: profile.sourceFile || null, routeName };
+  const days = Number(profile.daysInMonth) || daysInSourceMonth(profile.sourceMonth) || 1;
+  const divisor = profile.valueBasis === 'daily-average' ? 1 : days;
   const hours = (p.hours || []).map((x, hour) => {
     const board = Number(x.board || 0) / divisor;
     const alight = Number(x.alight || 0) / divisor;
@@ -349,10 +377,11 @@ function historicalForStation(station, routeName) {
   const level = ratio >= .72 ? 'high' : ratio >= .38 ? 'medium' : 'low';
   return {
     available: true,
+    routeName,
     match: exact ? 'station-id' : 'station-name',
     ambiguousName: Boolean(p.ambiguousName && !exact),
-    sourceMonth: passengerProfile.sourceMonth || null,
-    sourceFile: passengerProfile.sourceFile || null,
+    sourceMonth: profile.sourceMonth || null,
+    sourceFile: profile.sourceFile || null,
     valueBasis: 'daily-average',
     daysInMonth: days,
     hour,
@@ -374,6 +403,7 @@ function suggestedBoarding(stations, destinationSeqs, routeName) {
   return beforeFirst[Math.max(0, beforeFirst.length - 4)] || boardable[0];
 }
 function demoBootstrap() {
+  const profile = passengerProfileForRoute('7016');
   return {
     mode: 'demo',
     routes: ROUTE_LIST,
@@ -384,7 +414,7 @@ function demoBootstrap() {
     suggestedBoardingSeq: fallback7016Stops.find(s => /경복궁역3번출구/.test(s.stationNm))?.seq || 47,
     destinationSeq: fallback7016Stops.length,
     destinationSeqs: [fallback7016Stops.length],
-    passengerData: { available: Boolean(passengerProfile), sourceMonth: passengerProfile?.sourceMonth || null },
+    passengerData: { available: Boolean(profile), sourceMonth: profile?.sourceMonth || null },
     geminiConfigured: Boolean(GEMINI_API_KEY)
   };
 }
@@ -402,6 +432,7 @@ app.get('/api/bootstrap', async (req, res) => {
     const commute = commuteStations(all);
     const suggested = suggestedBoarding(commute.stations, commute.destinationSeqs, routeName);
     const initialDestination = suggested ? nextDestinationSeq(commute.destinationSeqs, suggested.seq) : commute.destinationSeqs[0];
+    const profile = passengerProfileForRoute(routeName);
     res.json({
       mode: 'live',
       routes: ROUTE_LIST,
@@ -420,7 +451,7 @@ app.get('/api/bootstrap', async (req, res) => {
       suggestedBoardingSeq: suggested?.seq ?? commute.stations[0]?.seq,
       destinationSeq: initialDestination,
       destinationSeqs: commute.destinationSeqs,
-      passengerData: { available: routeName === '7016' && Boolean(passengerProfile), sourceMonth: routeName === '7016' ? passengerProfile?.sourceMonth || null : null },
+      passengerData: { available: Boolean(profile), sourceMonth: profile?.sourceMonth || null },
       geminiConfigured: Boolean(GEMINI_API_KEY)
     });
   } catch (err) {
@@ -432,7 +463,7 @@ app.get('/api/bootstrap', async (req, res) => {
 function demoDashboard(boardOrd, destOrd) {
   const board = fallback7016Stops.find(s => s.seq === boardOrd) || fallback7016Stops[46];
   const dest = fallback7016Stops.find(s => s.seq === destOrd) || fallback7016Stops.at(-1);
-  const hist = passengerProfile ? historicalForStation(board, '7016') : null;
+  const hist = historicalForStation(board, '7016');
   const buses = [
     { index: 1, vehId: 'demo-1', plainNo: '서울74사7016', etaSec: 210, arrMsg: '약 3분 30초 후', congestion: { code: 4, label: '보통', level: 'normal' }, lowFloor: true, sectionOrd: Math.max(1, boardOrd - 2), destinationRideSec: 780, destinationEtaSec: 990, destinationEtaSource: 'vehicle-match' },
     { index: 2, vehId: 'demo-2', plainNo: '서울74사7716', etaSec: 690, arrMsg: '약 11분 30초 후', congestion: { code: 3, label: '여유', level: 'easy' }, lowFloor: true, sectionOrd: Math.max(1, boardOrd - 7), destinationRideSec: 760, destinationEtaSec: 1450, destinationEtaSource: 'route-estimate' }
@@ -597,26 +628,38 @@ app.post('/api/ai-advice', async (req, res) => {
 
 app.post('/api/reload-passenger-profile', (req, res) => {
   if (process.env.NODE_ENV === 'production') return res.status(404).json({ error: 'Not found' });
-  reloadPassengerProfile();
-  res.json({ ok: true, available: Boolean(passengerProfile), sourceMonth: passengerProfile?.sourceMonth || null });
+  reloadPassengerProfiles();
+  const profiles = Object.fromEntries(ROUTE_LIST.map(route => {
+    const p = passengerProfileForRoute(route);
+    return [route, { available: Boolean(p), sourceMonth: p?.sourceMonth || null }];
+  }));
+  res.json({ ok: true, profiles });
 });
-app.get('/api/health', (req, res) => res.json({
-  ok: true,
-  service: 'smu-campus-bus',
-  version: APP_VERSION,
-  routes: ROUTE_LIST,
-  timeZone: SEOUL_TIME_ZONE,
-  liveApiConfigured: Boolean(SERVICE_KEY),
-  passengerProfileLoaded: Boolean(passengerProfile),
-  passengerSourceMonth: passengerProfile?.sourceMonth || null,
-  passengerValueBasis: passengerProfile?.valueBasis || (passengerProfile ? 'legacy-monthly-total/normalized-at-runtime' : null),
-  geminiConfigured: Boolean(GEMINI_API_KEY),
-  geminiModel: GEMINI_API_KEY ? GEMINI_MODEL : null
-}));
+app.get('/api/health', (req, res) => {
+  const profiles = Object.fromEntries(ROUTE_LIST.map(route => {
+    const p = passengerProfileForRoute(route);
+    return [route, {
+      loaded: Boolean(p),
+      sourceMonth: p?.sourceMonth || null,
+      valueBasis: p?.valueBasis || (p ? 'legacy-monthly-total/normalized-at-runtime' : null)
+    }];
+  }));
+  res.json({
+    ok: true,
+    service: 'smu-campus-bus',
+    version: APP_VERSION,
+    routes: ROUTE_LIST,
+    timeZone: SEOUL_TIME_ZONE,
+    liveApiConfigured: Boolean(SERVICE_KEY),
+    passengerProfiles: profiles,
+    geminiConfigured: Boolean(GEMINI_API_KEY),
+    geminiModel: GEMINI_API_KEY ? GEMINI_MODEL : null
+  });
+});
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`SMU Campus Bus v${APP_VERSION}: http://localhost:${PORT}`);
   console.log(`지원 노선: ${ROUTE_LIST.join(', ')}`);
   console.log(`7016 정류장 fallback: ${fallback7016Stops.length}개`);
-  console.log(`승하차 프로필: ${passengerProfile ? 'loaded' : 'not loaded'}`);
+  console.log(`승하차 프로필: ${ROUTE_LIST.map(r => `${r}:${passengerProfiles.has(r) ? 'loaded' : 'missing'}`).join(', ')}`);
 });
