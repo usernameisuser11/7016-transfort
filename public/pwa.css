@@ -1,0 +1,53 @@
+.install-chip{
+  appearance:none;
+  cursor:pointer;
+  color:var(--accent);
+  border-color:rgba(145,255,176,.28);
+  background:rgba(145,255,176,.09);
+}
+.install-chip:hover{border-color:rgba(145,255,176,.5);background:rgba(145,255,176,.14)}
+.install-chip[hidden],.network-chip[hidden]{display:none!important}
+.network-chip{color:var(--yellow);border-color:rgba(255,227,140,.28);background:rgba(255,227,140,.08)}
+.pwa-install-guide{
+  position:fixed;
+  inset:0;
+  z-index:100;
+  display:grid;
+  place-items:end center;
+  padding:18px;
+  background:rgba(0,0,0,.56);
+  backdrop-filter:blur(10px);
+}
+.pwa-install-card{
+  width:min(520px,100%);
+  border:1px solid var(--line-strong);
+  border-radius:20px;
+  background:#0b1610;
+  color:var(--text);
+  box-shadow:0 28px 90px rgba(0,0,0,.5);
+  padding:20px;
+  display:flex;
+  align-items:flex-end;
+  justify-content:space-between;
+  gap:18px;
+}
+.pwa-install-card strong{display:block;font-size:18px;letter-spacing:-.02em}
+.pwa-install-card p{margin:8px 0 0;color:var(--muted);font-size:13px;line-height:1.6}
+.pwa-install-card button{
+  flex:0 0 auto;
+  min-height:44px;
+  padding:0 16px;
+  border:0;
+  border-radius:12px;
+  background:var(--accent);
+  color:#07110a;
+  font-weight:900;
+  cursor:pointer;
+}
+@media(max-width:620px){
+  .topbar .status-row{gap:5px}
+  .install-chip{max-width:110px}
+  .pwa-install-guide{padding:10px}
+  .pwa-install-card{align-items:stretch;flex-direction:column}
+  .pwa-install-card button{width:100%}
+}
