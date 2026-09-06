@@ -1,4 +1,4 @@
-const CACHE_NAME = 'smu-campus-v0.10.0';
+const CACHE_NAME = 'smu-campus-v0.10.1';
 const APP_SHELL = [
   '/',
   '/index.html',
@@ -12,7 +12,7 @@ const APP_SHELL = [
   '/7016-schoolbound-stops.json',
   '/icons/icon-192.png',
   '/icons/icon-512.png',
-  '/icons/icon-maskable-512.png'
+  '/icons/icon-maskable.svg'
 ];
 
 self.addEventListener('install', (event) => {
