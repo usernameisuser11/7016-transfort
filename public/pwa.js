@@ -84,14 +84,17 @@ updateNetworkBadge();
 
 if (isStandalone()) {
   setInstallButtonVisible(false);
-} else if (isIOS()) {
-  setInstallButtonVisible(true, '홈 화면 추가');
+} else {
+  setInstallButtonVisible(true, isIOS() ? '홈 화면 추가' : '앱 설치');
 }
 
 if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
   window.addEventListener('load', async () => {
     try {
-      const registration = await navigator.serviceWorker.register('/service-worker.js', { scope: '/' });
+      const registration = await navigator.serviceWorker.register('/service-worker.js', {
+        scope: '/',
+        updateViaCache: 'none'
+      });
       registration.update().catch(() => {});
     } catch (error) {
       console.error('PWA service worker registration failed:', error);
