@@ -2,6 +2,18 @@ const installButton = document.getElementById('installAppButton');
 const networkBadge = document.getElementById('networkBadge');
 let deferredInstallPrompt = null;
 
+// AI 분석 요청이 네트워크 문제로 무한정 대기하지 않도록 8초 제한을 둔다.
+const nativeFetch = window.fetch.bind(window);
+window.fetch = (input, init = {}) => {
+  const url = typeof input === 'string' ? input : String(input?.url || '');
+  if (!url.includes('/api/ai-advice') || init.signal) return nativeFetch(input, init);
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8000);
+  return nativeFetch(input, { ...init, signal: controller.signal })
+    .finally(() => clearTimeout(timer));
+};
+
 function isStandalone() {
   return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
 }
