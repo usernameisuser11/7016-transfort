@@ -1,13 +1,13 @@
-const CACHE_NAME = 'smu-campus-v0.10.1';
+const CACHE_NAME = 'smu-campus-v0.10.2';
 const APP_SHELL = [
   '/',
   '/index.html',
   '/styles.css?v=9.0',
   '/layout-fix.css?v=9.0',
   '/route-selector.css?v=9.0',
-  '/pwa.css?v=1.0',
+  '/pwa.css?v=1.1',
   '/app.js?v=9.0',
-  '/pwa.js?v=1.0',
+  '/pwa.js?v=1.1',
   '/manifest.webmanifest',
   '/7016-schoolbound-stops.json',
   '/icons/icon-192.png',
