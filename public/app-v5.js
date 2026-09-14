@@ -118,8 +118,17 @@ async function walkingEstimate(position, candidate) {
   if (walkApiAvailable !== false) {
     try {
       const c = stationCoordinates(candidate.station);
-      const params = new URLSearchParams({ startX: String(position.lon), startY: String(position.lat), endX: String(c.lon), endY: String(c.lat) });
-      const res = await fetch(`/api/walk?${params}`, { cache: 'no-store' });
+      const res = await fetch('/api/walk', {
+        method: 'POST',
+        cache: 'no-store',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          startX: position.lon,
+          startY: position.lat,
+          endX: c.lon,
+          endY: c.lat
+        })
+      });
       if (res.status === 404 || res.status === 501) {
         walkApiAvailable = false;
       } else if (res.ok) {
@@ -289,7 +298,7 @@ function renderAlternatives() {
     item.appendChild(button); list.appendChild(item);
   });
 }
-function renderMiniInfo(dashboard, option) {
+function renderMiniInfo(dashboard) {
   const buses = dashboard?.buses || [];
   $('firstBusMini').textContent = formatMinutes(buses[0]?.etaSec);
   $('firstBusMiniSub').textContent = buses[0]?.arrMsg || '실시간 도착정보';
