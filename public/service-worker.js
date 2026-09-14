@@ -1,12 +1,10 @@
-const CACHE_NAME = 'smu-campus-v0.10.2';
+const CACHE_NAME = 'smu-campus-v0.11.0';
 const APP_SHELL = [
   '/',
   '/index.html',
-  '/styles.css?v=9.0',
-  '/layout-fix.css?v=9.0',
-  '/route-selector.css?v=9.0',
+  '/smart-v5.css?v=5.0',
   '/pwa.css?v=1.1',
-  '/app.js?v=9.0',
+  '/app-v5.js?v=5.0',
   '/pwa.js?v=1.1',
   '/manifest.webmanifest',
   '/7016-schoolbound-stops.json',
@@ -40,7 +38,7 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
 
-  // 실시간 버스/Gemini 데이터는 절대 캐시하지 않는다.
+  // 실시간 버스/위치 기반 계산 API는 캐시하지 않는다.
   if (url.pathname.startsWith('/api/')) return;
 
   if (request.mode === 'navigate') {

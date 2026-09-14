@@ -1,14 +1,14 @@
 {
   "id": "/",
-  "name": "상명대 통학 버스",
+  "name": "상명대 스마트 통학",
   "short_name": "상명대 통학",
-  "description": "종로13, 서대문08, 7016의 실시간 도착정보와 상명대 통학 정보를 확인합니다.",
+  "description": "현재 위치, 보행 경로, 실시간 버스 정보를 결합해 상명대학교까지 가장 현실적인 통학 경로와 출발 시점을 안내합니다.",
   "lang": "ko-KR",
   "start_url": "/?source=pwa",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#07100b",
-  "theme_color": "#07100b",
+  "background_color": "#06100a",
+  "theme_color": "#08110c",
   "categories": ["navigation", "travel", "utilities"],
   "prefer_related_applications": false,
   "icons": [

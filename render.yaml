@@ -12,9 +12,7 @@ services:
         value: 24.14.1
       - key: DATA_GO_KR_SERVICE_KEY
         sync: false
-      - key: GEMINI_API_KEY
+      - key: TMAP_APP_KEY
         sync: false
-      - key: GEMINI_MODEL
-        value: gemini-3.8-flash
       - key: PASSENGER_PROFILE_FILE
         value: data/7016-passenger-profile.json
