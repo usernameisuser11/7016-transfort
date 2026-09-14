@@ -20,10 +20,11 @@ async function walkHandler(req, res) {
     return res.status(501).json({ error: 'TMAP_APP_KEY_NOT_CONFIGURED', source: 'fallback-required' });
   }
 
-  const startX = numberInRange(req.query.startX, -180, 180);
-  const startY = numberInRange(req.query.startY, -90, 90);
-  const endX = numberInRange(req.query.endX, -180, 180);
-  const endY = numberInRange(req.query.endY, -90, 90);
+  const body = req.body || {};
+  const startX = numberInRange(body.startX, -180, 180);
+  const startY = numberInRange(body.startY, -90, 90);
+  const endX = numberInRange(body.endX, -180, 180);
+  const endY = numberInRange(body.endY, -90, 90);
   if ([startX, startY, endX, endY].some((v) => v == null)) {
     return res.status(400).json({ error: '유효한 출발/도착 좌표가 필요합니다.' });
   }
@@ -91,7 +92,7 @@ express.application.post = function patchedPost(path, ...handlers) {
 
 // server.js가 listen 하기 직전에 위치 기반 도보 경로 API를 추가한다.
 express.application.listen = function patchedListen(...args) {
-  this.get('/api/walk', walkHandler);
+  this.post('/api/walk', walkHandler);
   express.application.listen = originalListen;
   return originalListen.apply(this, args);
 };
