@@ -3,181 +3,167 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="description" content="종로13, 서대문08, 7016의 실시간 도착정보와 상명대 통학 정보를 확인합니다." />
-  <meta name="theme-color" content="#07100b" />
+  <meta name="description" content="현재 위치와 실시간 버스 정보를 결합해 상명대학교까지 가장 현실적인 통학 경로와 출발 시점을 안내합니다." />
+  <meta name="theme-color" content="#08110c" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="상명대 통학" />
-  <title>상명대 통학 버스</title>
+  <title>상명대 스마트 통학</title>
   <link rel="manifest" href="/manifest.webmanifest" />
   <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
   <link rel="apple-touch-icon" href="/icons/icon-192.png" />
-  <link rel="stylesheet" href="/styles.css?v=9.0" />
-  <link rel="stylesheet" href="/layout-fix.css?v=9.0" />
-  <link rel="stylesheet" href="/route-selector.css?v=9.0" />
+  <link rel="stylesheet" href="/smart-v5.css?v=5.0" />
   <link rel="stylesheet" href="/pwa.css?v=1.1" />
 </head>
 <body>
-  <main class="shell">
+  <div id="locationSheet" class="sheet-backdrop" hidden>
+    <section class="consent-sheet" role="dialog" aria-modal="true" aria-labelledby="locationTitle">
+      <span class="sheet-handle" aria-hidden="true"></span>
+      <div class="consent-icon" aria-hidden="true">◎</div>
+      <p class="eyebrow">위치 기반 스마트 통학</p>
+      <h2 id="locationTitle">현재 위치를 사용해도 될까요?</h2>
+      <p class="consent-copy">현재 위치는 가까운 학교행 정류장과 도보 시간을 계산하는 데만 사용합니다. 정확한 위치 좌표는 이 서비스의 DB에 저장하지 않습니다.</p>
+      <label class="consent-check"><input id="locationConsentCheck" type="checkbox" /><span>위치정보 이용 안내를 확인했어요</span></label>
+      <div class="consent-links"><button id="termsButton" class="text-button" type="button">이용 안내 보기</button><button id="privacyButton" class="text-button" type="button">개인정보 처리 원칙</button></div>
+      <button id="allowLocationButton" class="primary-button wide" type="button" disabled>동의하고 현재 위치 사용</button>
+      <button id="manualModeButton" class="secondary-button wide" type="button">위치 없이 사용</button>
+    </section>
+  </div>
+
+  <div id="infoSheet" class="sheet-backdrop" hidden>
+    <section class="consent-sheet compact" role="dialog" aria-modal="true" aria-labelledby="infoSheetTitle">
+      <span class="sheet-handle" aria-hidden="true"></span>
+      <h2 id="infoSheetTitle">위치정보 이용 안내</h2>
+      <div id="infoSheetBody" class="info-sheet-body"></div>
+      <button id="closeInfoSheet" class="primary-button wide" type="button">확인</button>
+    </section>
+  </div>
+
+  <main class="app-shell">
     <header class="topbar">
-      <div class="brand">
-        <div id="routeBadge" class="route-badge">7016</div>
-        <div>
-          <p class="overline">SMU COMMUTE</p>
-          <h1 id="pageHeading">7016 상명대 통학</h1>
-        </div>
+      <div>
+        <p class="eyebrow">SMU SMART COMMUTE</p>
+        <h1>상명대 스마트 통학</h1>
       </div>
-      <div class="status-row">
-        <button id="installAppButton" class="status-chip install-chip" type="button" hidden>앱 설치</button>
-        <span id="networkBadge" class="status-chip network-chip" hidden>OFFLINE</span>
-        <span id="stopCountBadge" class="status-chip">정류장 -</span>
-        <span id="modeBadge" class="status-chip live">연결 중</span>
+      <div class="header-actions">
+        <button id="installAppButton" class="mini-button" type="button" hidden>앱 설치</button>
+        <span id="networkBadge" class="status-dot offline" hidden>OFFLINE</span>
+        <span id="modeBadge" class="status-dot">준비 중</span>
       </div>
     </header>
 
-    <section class="route-selector panel" aria-label="노선 선택">
-      <div class="route-selector-copy">
-        <span class="section-label">노선 선택</span>
-        <strong>상명대 정문까지 올라가는 버스</strong>
+    <section class="location-strip panel">
+      <div class="location-row">
+        <span class="location-dot" aria-hidden="true"></span>
+        <div class="location-copy">
+          <small>출발</small>
+          <strong id="originText">현재 위치 확인 전</strong>
+        </div>
+        <button id="refreshLocationButton" class="icon-button" type="button" aria-label="현재 위치 다시 확인">↻</button>
       </div>
-      <div class="route-list" role="listbox" aria-label="통학 버스 노선">
-        <button type="button" class="route-choice" data-route="종로13" role="option" aria-selected="false">종로13</button>
-        <button type="button" class="route-choice" data-route="서대문08" role="option" aria-selected="false">서대문08</button>
-        <button type="button" class="route-choice active" data-route="7016" role="option" aria-selected="true">7016</button>
+      <div class="destination-row">
+        <span class="school-dot" aria-hidden="true"></span>
+        <div class="location-copy">
+          <small>도착</small>
+          <strong>상명대학교 서울캠퍼스</strong>
+        </div>
+        <span class="fixed-chip">고정</span>
       </div>
     </section>
 
-    <section class="hero panel recommendation" aria-live="polite">
+    <section id="loadingCard" class="hero-card panel loading-card">
+      <div class="loading-orbit" aria-hidden="true"></div>
       <div>
-        <span class="section-label">지금 탈까, 다음 차 탈까?</span>
-        <h2 id="recommendationTitle">실시간 정보를 불러오는 중</h2>
-        <p id="recommendationReason">7016의 도착시간과 혼잡도를 비교합니다</p>
-      </div>
-      <span id="recommendationIcon" class="recommendation-action">7016</span>
-    </section>
-
-    <section class="controls panel" aria-label="통학 경로 설정">
-      <div class="picker-field">
-        <span class="field-label">승차 정류장</span>
-        <button id="boardingPickerButton" class="picker-button" type="button" aria-haspopup="listbox" aria-controls="boardingPickerMenu" aria-expanded="false">
-          <span id="boardingPickerText">정류장 불러오는 중</span>
-          <span class="chevron" aria-hidden="true">⌄</span>
-        </button>
-        <div id="boardingPickerMenu" class="picker-menu" hidden>
-          <div class="picker-search-wrap">
-            <input id="boardingSearch" class="picker-search" type="search" placeholder="정류장명 또는 ARS 번호 검색" autocomplete="off" aria-label="승차 정류장 검색" />
-          </div>
-          <div id="boardingOptions" class="picker-options" role="listbox" aria-label="승차 정류장 목록"></div>
-        </div>
-        <input id="boardingSelect" type="hidden" />
-      </div>
-
-      <div class="route-arrow" aria-hidden="true">→</div>
-
-      <div class="fixed-field">
-        <span class="field-label">목적지</span>
-        <div class="fixed-destination">
-          <span class="destination-dot" aria-hidden="true"></span>
-          <strong id="destinationText">상명대정문</strong>
-          <span class="fixed-note">고정</span>
-        </div>
-        <input id="destinationSelect" type="hidden" />
-      </div>
-
-      <div class="refresh-wrap">
-        <button id="refreshButton" type="button">새로고침</button>
-        <span id="refreshStatus" class="refresh-status" aria-live="polite">자동 갱신 30초</span>
+        <p class="eyebrow">통학 경로 계산 중</p>
+        <h2 id="loadingTitle">이용 가능한 학교행 정류장을 찾고 있어요</h2>
+        <p id="loadingDetail" class="muted">현재 위치와 실시간 버스 정보를 확인합니다.</p>
       </div>
     </section>
 
-    <section class="metrics-panel" aria-label="운행 요약">
-      <div class="metric panel"><span>첫 도착 버스</span><strong id="nextBusEta">-</strong><small id="nextBusMessage">도착 정보</small></div>
-      <div class="metric panel"><span>현재 도착 간격</span><strong id="actualHeadway">-</strong><small id="scheduledHeadway">공식 배차 -</small></div>
-      <div class="metric panel"><span>상명대 도착</span><strong id="schoolEta">-</strong><small id="rideTime">예상 이동시간 -</small></div>
-      <div class="metric panel"><span>운행 차량</span><strong id="runningCount">-</strong><small id="runningRouteNote">현재 7016 노선</small></div>
+    <section id="recommendationCard" class="hero-card panel" hidden>
+      <div class="hero-topline">
+        <div>
+          <p class="eyebrow">추천 통학 경로</p>
+          <span id="leaveStatusChip" class="leave-chip good">여유 있어요</span>
+        </div>
+        <div class="arrival-summary"><small>학교 도착</small><strong id="arrivalClock">--:--</strong></div>
+      </div>
+
+      <h2 id="leaveHeadline">지금 출발하세요</h2>
+      <p id="leaveReason" class="hero-reason">정류장과 버스 도착시간을 계산했습니다.</p>
+
+      <div class="route-summary-line">
+        <div class="route-main">
+          <span id="routePill" class="route-pill">7016</span>
+          <div><strong id="boardingName">-</strong><small id="boardingMeta">-</small></div>
+        </div>
+        <div class="total-time"><small>총 예상</small><strong id="totalTime">-</strong></div>
+      </div>
+
+      <div class="journey-grid" aria-label="추천 경로 요약">
+        <div class="journey-item"><span class="journey-icon">🚶</span><small>정류장까지</small><strong id="walkTime">-</strong><em id="walkDistance">-</em></div>
+        <div class="journey-arrow">→</div>
+        <div class="journey-item"><span class="journey-icon">🚌</span><small>버스 도착</small><strong id="busEta">-</strong><em id="busRide">-</em></div>
+        <div class="journey-arrow">→</div>
+        <div class="journey-item"><span class="journey-icon">🎓</span><small>상명대</small><strong id="campusWalk">-</strong><em>정문 기준</em></div>
+      </div>
+
+      <div class="freshness-row"><span id="walkSource">도보 시간 계산 중</span><span id="updatedAt">-</span></div>
+      <div class="hero-actions"><button id="showRouteButton" class="primary-button" type="button">경로 자세히</button><button id="showAlternativesButton" class="secondary-button" type="button">다른 경로</button></div>
     </section>
 
-    <section class="bus-grid">
-      <article class="bus-card panel primary" id="busCard1">
-        <div class="bus-card-head">
-          <div><span class="bus-order">첫 번째</span><h3>이번 버스</h3></div>
-          <span id="congestion1" class="congestion unknown">정보 없음</span>
-        </div>
-        <div class="bus-main"><strong id="busEta1">-</strong><span id="busArrMsg1">도착정보 없음</span></div>
-        <div class="bus-meta">
-          <span>차량 <strong id="busNo1">-</strong></span>
-          <span>상명대 <strong id="busSchool1">-</strong></span>
-          <span>저상 <strong id="lowFloor1">-</strong></span>
-        </div>
-      </article>
-
-      <article class="bus-card panel" id="busCard2">
-        <div class="bus-card-head">
-          <div><span class="bus-order secondary">두 번째</span><h3>다음 버스</h3></div>
-          <span id="congestion2" class="congestion unknown">정보 없음</span>
-        </div>
-        <div class="bus-main"><strong id="busEta2">-</strong><span id="busArrMsg2">도착정보 없음</span></div>
-        <div class="bus-meta">
-          <span>차량 <strong id="busNo2">-</strong></span>
-          <span>상명대 <strong id="busSchool2">-</strong></span>
-          <span>저상 <strong id="lowFloor2">-</strong></span>
-        </div>
-      </article>
+    <section id="routeDetail" class="panel detail-card" hidden>
+      <div class="section-head"><div><p class="eyebrow">ROUTE</p><h3>통학 경로</h3></div><button id="closeRouteButton" class="icon-button" type="button" aria-label="경로 닫기">×</button></div>
+      <div class="vertical-route">
+        <div class="route-step"><span class="step-dot start"></span><div><small>현재 위치</small><strong id="detailOrigin">내 위치</strong><p id="detailWalk">-</p></div></div>
+        <div class="step-line"><span id="detailWalkBadge">도보</span></div>
+        <div class="route-step"><span class="step-dot bus"></span><div><small>승차 정류장</small><strong id="detailBoarding">-</strong><p id="detailBusWait">-</p></div></div>
+        <div class="step-line bus-line"><span id="detailBusBadge">버스</span></div>
+        <div class="route-step"><span class="step-dot stop"></span><div><small>하차</small><strong id="detailDestination">상명대정문</strong><p id="detailRide">-</p></div></div>
+        <div class="step-line"><span id="detailFinalWalkBadge">도보</span></div>
+        <div class="route-step"><span class="step-dot school"></span><div><small>도착</small><strong>상명대학교 서울캠퍼스</strong><p id="detailArrival">-</p></div></div>
+      </div>
+      <p class="detail-note" id="routeDecisionNote"></p>
     </section>
 
-    <section class="details-stack">
-      <details class="detail-panel panel">
-        <summary><span>노선 위치</span><small id="updatedAt">-</small></summary>
-        <div class="detail-body">
-          <div class="route-line">
-            <div class="route-track"></div>
-            <div class="route-dot start"></div>
-            <div class="route-dot school"></div>
-            <div class="route-label start-label" id="routeStartLabel">승차</div>
-            <div class="route-label school-label" id="routeEndLabel">상명대</div>
-            <div id="busMarker1" class="bus-marker b1">1</div>
-            <div id="busMarker2" class="bus-marker b2">2</div>
-          </div>
-          <p id="routePositionSummary" class="muted small footnote">실시간 차량 위치를 확인하는 중입니다</p>
-        </div>
-      </details>
-
-      <details class="detail-panel panel">
-        <summary><span>시간대별 승하차</span><small id="passengerSource">승하차 데이터 확인 중</small></summary>
-        <div class="detail-body passenger-body">
-          <div class="passenger-summary">
-            <div><span>시간대</span><strong id="histHour">-</strong></div>
-            <div><span>일평균 승차</span><strong id="histBoard">-</strong></div>
-            <div><span>일평균 하차</span><strong id="histAlight">-</strong></div>
-            <div><span>수요 강도</span><strong id="histLevel">-</strong></div>
-          </div>
-          <div id="hourlyBars" class="hourly-bars" aria-label="시간대별 승차 수요"></div>
-          <p id="histNote" class="muted small footnote">노선별 월간 승하차 데이터를 시간대 일평균으로 환산합니다</p>
-        </div>
-      </details>
-
-      <details class="detail-panel panel">
-        <summary><span>AI 분석</span><small>필요할 때만 추가 판단</small></summary>
-        <div class="detail-body ai-body">
-          <div class="ai-head">
-            <p class="muted">현재 배차·혼잡도·시간대 수요를 한 번 더 비교합니다</p>
-            <button id="aiAdviceButton" class="ai-button" type="button">Gemini 분석</button>
-          </div>
-          <div id="aiEmpty" class="ai-empty">실시간 데이터가 애매할 때 보조로 사용해</div>
-          <div id="aiResult" class="ai-result" hidden>
-            <div class="ai-decision-row"><span id="aiDecisionBadge" class="ai-decision neutral">AI</span><strong id="aiHeadline">-</strong></div>
-            <p id="aiReason">-</p>
-            <div class="ai-notes"><div><span>주의</span><p id="aiRisk">-</p></div><div><span>팁</span><p id="aiTip">-</p></div></div>
-            <div id="aiModel" class="muted small"></div>
-          </div>
-        </div>
-      </details>
+    <section id="alternativesSection" class="panel alternatives-card" hidden>
+      <div class="section-head"><div><p class="eyebrow">ALTERNATIVES</p><h3>다른 이용 가능한 경로</h3></div><button id="closeAlternativesButton" class="icon-button" type="button" aria-label="대체 경로 닫기">×</button></div>
+      <div id="alternativesList" class="alternatives-list"></div>
     </section>
 
-    <footer><span>SMU Campus Bus</span><span>서울시 버스 Open API · 3개 노선 월간 교통카드 승하차 데이터</span></footer>
+    <section id="manualSection" class="panel manual-card" hidden>
+      <div class="section-head"><div><p class="eyebrow">MANUAL</p><h3>정류장 직접 선택</h3></div></div>
+      <p class="muted">위치를 사용하지 않을 때만 필요한 최소 입력입니다.</p>
+      <div class="manual-grid">
+        <label><span>노선</span><select id="manualRoute"><option value="7016">7016</option><option value="서대문08">서대문08</option><option value="종로13">종로13</option></select></label>
+        <label><span>승차 정류장</span><select id="manualStop"><option>정류장 불러오는 중</option></select></label>
+      </div>
+      <button id="manualSearchButton" class="primary-button wide" type="button">이 정류장 기준으로 보기</button>
+    </section>
+
+    <section class="quick-info-grid">
+      <article class="mini-panel panel"><span>첫 버스</span><strong id="firstBusMini">-</strong><small id="firstBusMiniSub">실시간</small></article>
+      <article class="mini-panel panel"><span>다음 버스</span><strong id="nextBusMini">-</strong><small id="nextBusMiniSub">실시간</small></article>
+      <article class="mini-panel panel"><span>예상 혼잡</span><strong id="demandMini">-</strong><small>과거 승하차 통계</small></article>
+    </section>
+
+    <details class="panel stats-panel">
+      <summary><span>시간대별 통학 참고 정보</span><small id="passengerSource">통계 확인 중</small></summary>
+      <div class="stats-body">
+        <div class="stats-values"><div><span>시간대</span><strong id="histHour">-</strong></div><div><span>평균 승차</span><strong id="histBoard">-</strong></div><div><span>평균 하차</span><strong id="histAlight">-</strong></div><div><span>수요 강도</span><strong id="histLevel">-</strong></div></div>
+        <div id="hourlyBars" class="hourly-bars" aria-label="시간대별 승차 수요"></div>
+        <p id="histNote" class="detail-note">실시간 혼잡도가 아니라 월간 교통카드 통계 기반 참고 정보입니다.</p>
+      </div>
+    </details>
+
+    <footer>
+      <span>SMU Smart Commute V5</span>
+      <span>위치 좌표 비저장 · AI 기능 미사용</span>
+    </footer>
   </main>
-  <script type="module" src="/app.js?v=9.0"></script>
+
+  <script type="module" src="/app-v5.js?v=5.0"></script>
   <script type="module" src="/pwa.js?v=1.1"></script>
 </body>
 </html>
