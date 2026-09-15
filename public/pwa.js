@@ -1,3 +1,5 @@
+import './campus-arrival-guard.js?v=1.0';
+
 const installButton = document.getElementById('installAppButton');
 const networkBadge = document.getElementById('networkBadge');
 let deferredInstallPrompt = null;
