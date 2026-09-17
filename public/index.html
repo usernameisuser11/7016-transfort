@@ -135,6 +135,7 @@
     <section id="manualSection" class="panel manual-card" hidden>
       <div class="section-head"><div><p class="eyebrow">MANUAL</p><h3>정류장 직접 선택</h3></div></div>
       <p class="muted">위치를 사용하지 않을 때만 필요한 최소 입력입니다.</p>
+      <p class="muted">PC에서 위치가 안 잡히면 주소창의 위치 권한과 Windows 위치 서비스를 확인한 뒤 위의 ↻ 버튼으로 다시 시도할 수 있습니다.</p>
       <div class="manual-grid">
         <label><span>노선</span><select id="manualRoute"><option value="7016">7016</option><option value="서대문08">서대문08</option><option value="종로13">종로13</option></select></label>
         <label><span>승차 정류장</span><select id="manualStop"><option>정류장 불러오는 중</option></select></label>
@@ -153,16 +154,122 @@
       <div class="stats-body">
         <div class="stats-values"><div><span>시간대</span><strong id="histHour">-</strong></div><div><span>평균 승차</span><strong id="histBoard">-</strong></div><div><span>평균 하차</span><strong id="histAlight">-</strong></div><div><span>수요 강도</span><strong id="histLevel">-</strong></div></div>
         <div id="hourlyBars" class="hourly-bars" aria-label="시간대별 승차 수요"></div>
-        <p id="histNote" class="detail-note">실시간 혼잡도가 아니라 월간 교통카드 통계 기반 참고 정보입니다.</p>
+        <p id="histNote" class="detail-note">실시간 혼잡도가 아니라 월간 교통카드 시간대별 일평균을 이용한 참고 정보입니다.</p>
       </div>
     </details>
 
     <footer>
-      <span>SMU Smart Commute V5</span>
+      <span>SMU Smart Commute V5.1</span>
       <span>위치 좌표 비저장 · AI 기능 미사용</span>
     </footer>
   </main>
 
+  <script>
+    (() => {
+      const MAX_LOCATION_ACCURACY_M = 1200;
+      const geo = navigator.geolocation;
+      const loadingTitle = document.getElementById('loadingTitle');
+      const loadingDetail = document.getElementById('loadingDetail');
+      const originText = document.getElementById('originText');
+      let locationHint = '';
+
+      const setHint = (message) => { locationHint = message || ''; };
+      const locationError = (code, message) => ({ code, message, PERMISSION_DENIED: 1, POSITION_UNAVAILABLE: 2, TIMEOUT: 3 });
+      const accuracyText = (meters) => meters >= 1000 ? `${(meters / 1000).toFixed(1)}km` : `${Math.round(meters)}m`;
+
+      const validatePosition = (position) => {
+        const lat = Number(position?.coords?.latitude);
+        const lon = Number(position?.coords?.longitude);
+        const accuracy = Number(position?.coords?.accuracy);
+        if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) {
+          throw locationError(2, '브라우저가 유효한 위치 좌표를 제공하지 못했습니다.');
+        }
+        if (!Number.isFinite(accuracy) || accuracy <= 0) {
+          throw locationError(2, '현재 위치의 정확도를 확인하지 못했습니다.');
+        }
+        if (accuracy > MAX_LOCATION_ACCURACY_M) {
+          throw locationError(2, `위치 오차가 약 ${accuracyText(accuracy)}로 너무 커서 잘못된 정류장을 추천할 수 있습니다.`);
+        }
+        return position;
+      };
+
+      const explainFailure = (error) => {
+        if (!window.isSecureContext && location.hostname !== 'localhost') {
+          return '현재 페이지가 보안 연결(HTTPS)이 아니어서 위치 기능을 사용할 수 없습니다.';
+        }
+        if (error?.code === 1) {
+          return '위치 권한이 차단되어 있습니다. 주소창의 사이트 권한에서 위치를 허용한 뒤 ↻를 눌러 다시 시도해 주세요. Windows PC라면 설정 > 개인정보 및 보안 > 위치도 켜져 있어야 합니다.';
+        }
+        if (error?.message?.startsWith('위치 오차가')) {
+          return `${error.message} 아래에서 정류장을 직접 선택하거나 ↻로 다시 확인해 주세요.`;
+        }
+        if (error?.code === 3) {
+          return '위치 확인 시간이 초과되었습니다. PC나 유선 인터넷 환경에서는 위치 확인이 느릴 수 있습니다. Windows 위치 서비스와 브라우저 권한을 확인한 뒤 ↻로 다시 시도하거나 정류장을 직접 선택해 주세요.';
+        }
+        return '기기에서 현재 위치를 찾지 못했습니다. PC나 유선 인터넷에서는 위치 정확도가 낮을 수 있습니다. Windows 위치 서비스와 브라우저 위치 권한을 확인하거나 아래에서 정류장을 직접 선택해 주세요.';
+      };
+
+      if (!geo?.getCurrentPosition) {
+        setHint('이 브라우저는 위치 기능을 지원하지 않습니다. 아래에서 노선과 정류장을 직접 선택해 주세요.');
+      } else {
+        const nativeGetCurrentPosition = geo.getCurrentPosition.bind(geo);
+        const requestPosition = (options) => new Promise((resolve, reject) => nativeGetCurrentPosition(resolve, reject, options));
+        const patchedGetCurrentPosition = (success, failure) => {
+          (async () => {
+            try {
+              const precise = validatePosition(await requestPosition({ enableHighAccuracy: true, timeout: 12000, maximumAge: 15000 }));
+              setHint('');
+              success?.(precise);
+              return;
+            } catch (firstError) {
+              if (firstError?.code === 1) {
+                setHint(explainFailure(firstError));
+                failure?.(firstError);
+                return;
+              }
+              try {
+                const fallback = validatePosition(await requestPosition({ enableHighAccuracy: false, timeout: 10000, maximumAge: 60000 }));
+                setHint('');
+                success?.(fallback);
+                return;
+              } catch (secondError) {
+                setHint(explainFailure(secondError));
+                failure?.(secondError);
+              }
+            }
+          })();
+        };
+
+        try {
+          geo.getCurrentPosition = patchedGetCurrentPosition;
+          if (geo.getCurrentPosition !== patchedGetCurrentPosition) {
+            Object.defineProperty(geo, 'getCurrentPosition', { configurable: true, value: patchedGetCurrentPosition });
+          }
+        } catch {
+          setHint('현재 브라우저에서는 위치 재시도 기능을 적용하지 못했습니다. 위치가 안 잡히면 브라우저 권한과 Windows 위치 서비스를 확인하거나 정류장을 직접 선택해 주세요.');
+        }
+
+        navigator.permissions?.query?.({ name: 'geolocation' }).then((status) => {
+          if (status.state === 'denied') setHint(explainFailure(locationError(1, 'permission denied')));
+        }).catch(() => {});
+      }
+
+      const improveFailureMessage = () => {
+        if (!loadingTitle || !loadingDetail) return;
+        if (loadingTitle.textContent.includes('위치 없이도')) {
+          if (!locationHint) {
+            setHint('현재 위치를 확인하지 못했습니다. 브라우저 위치 권한과 Windows 위치 서비스를 확인한 뒤 ↻로 다시 시도하거나 아래에서 정류장을 직접 선택해 주세요.');
+          }
+          loadingDetail.textContent = locationHint;
+          if (originText) originText.textContent = '위치 확인 필요 · ↻ 재시도';
+        }
+      };
+
+      const observer = new MutationObserver(improveFailureMessage);
+      if (loadingTitle) observer.observe(loadingTitle, { childList: true, subtree: true, characterData: true });
+      if (loadingDetail) observer.observe(loadingDetail, { childList: true, subtree: true, characterData: true });
+    })();
+  </script>
   <script type="module" src="/app-v5.js?v=5.0"></script>
   <script type="module" src="/pwa.js?v=1.1"></script>
 </body>
