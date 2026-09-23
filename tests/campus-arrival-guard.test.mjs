@@ -10,7 +10,7 @@ function fixture() {
   const root = { dataset: { originMode: 'gps' } };
   const elements = new Map();
   const element = (name) => {
-    if (!elements.has(name)) elements.set(name, { hidden: false, textContent: '', className: '' });
+    if (!elements.has(name)) elements.set(name, { hidden: false, textContent: '', className: '', addEventListener() {} });
     return elements.get(name);
   };
   const modeObservers = [];
