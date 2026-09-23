@@ -100,7 +100,12 @@ async function placeHandler(req, res) {
   try {
     const response = await fetch(url, { headers: { Accept: 'application/json', appKey: TMAP_APP_KEY }, signal: AbortSignal.timeout(8000) });
     const data = await response.json().catch(() => null);
-    if (!response.ok) return res.status(502).json({ error: '장소 검색 서버가 응답하지 않았어요. 잠시 후 다시 시도해 주세요.' });
+    if (!response.ok) {
+      // Avoid leaking the server-side API key if an upstream error echoes it.
+      const responseBody = JSON.stringify(data ?? null).replaceAll(TMAP_APP_KEY, '[REDACTED]').slice(0, 2000);
+      console.error('[TMAP 장소 검색 오류]', { status: response.status, error: responseBody });
+      return res.status(502).json({ error: '장소 검색 서버가 응답하지 않았어요. 잠시 후 다시 시도해 주세요.' });
+    }
     const items = data?.searchPoiInfo?.pois?.poi || [];
     const places = (Array.isArray(items) ? items : [items]).map((item) => {
       const lat = Number(item.noorLat || item.frontLat);
@@ -116,7 +121,8 @@ async function placeHandler(req, res) {
     placeCache.set(cacheKey, { at: Date.now(), value });
     if (placeCache.size > 100) placeCache.delete(placeCache.keys().next().value);
     return res.json(value);
-  } catch {
+  } catch (error) {
+    console.error('[TMAP 장소 검색 요청 오류]', { name: error?.name, message: error?.message });
     return res.status(502).json({ error: '장소 검색에 실패했어요. 잠시 후 다시 시도해 주세요.' });
   }
 }
