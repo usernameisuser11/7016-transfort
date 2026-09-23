@@ -1,4 +1,4 @@
-import './campus-arrival-guard.js?v=1.0';
+import './campus-arrival-guard.js?v=1.1';
 
 const installButton = document.getElementById('installAppButton');
 const networkBadge = document.getElementById('networkBadge');

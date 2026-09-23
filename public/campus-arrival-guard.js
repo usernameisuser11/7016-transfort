@@ -9,6 +9,23 @@ let anchorPromise = null;
 let observersInstalled = false;
 let applyingArrivalState = false;
 let recheckTimer = null;
+let arrivalHiddenState = null;
+
+function isGpsOriginMode() {
+  return document.documentElement.dataset.originMode === 'gps';
+}
+
+// The arrival overlay is independent from the trip calculator. Undo only the
+// UI elements it forcibly hid when the user chooses a simulated/manual origin.
+function restoreArrivalPresentation() {
+  campusArrived = false;
+  campusDistanceM = null;
+  delete document.documentElement.dataset.campusArrived;
+  if (arrivalHiddenState) {
+    for (const { element, hidden } of arrivalHiddenState) element.hidden = hidden;
+    arrivalHiddenState = null;
+  }
+}
 
 function haversineMeters(lat1, lon1, lat2, lon2) {
   if (![lat1, lon1, lat2, lon2].every(Number.isFinite)) return Infinity;
@@ -97,9 +114,17 @@ function setHidden(target, hidden) {
 }
 
 function applyCampusArrivalState() {
-  if (!campusArrived || applyingArrivalState) return;
+  if (!campusArrived || applyingArrivalState || !isGpsOriginMode()) return;
   applyingArrivalState = true;
   try {
+    if (!arrivalHiddenState) {
+      arrivalHiddenState = [
+        document.getElementById('showRouteButton'),
+        document.getElementById('showAlternativesButton'),
+        document.querySelector('.quick-info-grid'),
+        document.querySelector('.stats-panel')
+      ].filter(Boolean).map((element) => ({ element, hidden: element.hidden }));
+    }
     document.documentElement.dataset.campusArrived = 'true';
 
     setHidden('loadingCard', true);
@@ -156,7 +181,7 @@ function installArrivalObservers() {
   ].filter(Boolean);
 
   const observer = new MutationObserver(() => {
-    if (campusArrived) queueMicrotask(applyCampusArrivalState);
+    if (campusArrived && isGpsOriginMode()) queueMicrotask(applyCampusArrivalState);
   });
 
   for (const target of targets) {
@@ -165,10 +190,18 @@ function installArrivalObservers() {
 }
 
 async function checkCampusArrival() {
-  if (localStorage.getItem(LOCATION_CONSENT_KEY) !== 'granted') return;
+  if (!isGpsOriginMode() || localStorage.getItem(LOCATION_CONSENT_KEY) !== 'granted') {
+    restoreArrivalPresentation();
+    return;
+  }
 
   try {
     const [anchors, position] = await Promise.all([loadCampusAnchors(), getCurrentPosition()]);
+    // GPS can finish after the user has switched to a searched place.
+    if (!isGpsOriginMode() || localStorage.getItem(LOCATION_CONSENT_KEY) !== 'granted') {
+      restoreArrivalPresentation();
+      return;
+    }
     if (!anchors.length) return;
 
     const nearest = Math.min(...anchors.map((anchor) => haversineMeters(position.lat, position.lon, anchor.lat, anchor.lon)));
@@ -195,6 +228,11 @@ function scheduleRecheck(delay = 500) {
   clearTimeout(recheckTimer);
   recheckTimer = setTimeout(checkCampusArrival, delay);
 }
+
+new MutationObserver(() => {
+  if (!isGpsOriginMode()) restoreArrivalPresentation();
+  else scheduleRecheck(100);
+}).observe(document.documentElement, { attributes: true, attributeFilter: ['data-origin-mode'] });
 
 window.addEventListener('load', () => scheduleRecheck(700));
 document.getElementById('refreshLocationButton')?.addEventListener('click', () => scheduleRecheck(900));

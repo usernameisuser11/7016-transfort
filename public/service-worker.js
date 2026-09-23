@@ -1,12 +1,12 @@
-const CACHE_NAME = 'smu-campus-v0.12.0';
+const CACHE_NAME = 'smu-campus-v0.12.1';
 const APP_SHELL = [
   '/',
   '/index.html',
   '/smart-v5.css?v=5.2',
   '/pwa.css?v=1.1',
-  '/app-v5.js?v=5.2',
-  '/pwa.js?v=1.1',
-  '/campus-arrival-guard.js?v=1.0',
+  '/app-v5.js?v=5.3',
+  '/pwa.js?v=1.2',
+  '/campus-arrival-guard.js?v=1.1',
   '/manifest.webmanifest',
   '/7016-schoolbound-stops.json',
   '/icons/icon-192.png',

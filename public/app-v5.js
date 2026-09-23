@@ -18,6 +18,11 @@ let originRevision = 0;
 let originLabel = "현재 위치";
 let originSearchRevision = 0;
 
+// Shared with campus-arrival-guard.js: only real GPS mode may show campus arrival.
+function setOriginMode(mode) {
+  document.documentElement.dataset.originMode = mode;
+}
+
 function formatMinutes(sec) {
   if (sec == null || !Number.isFinite(Number(sec))) return '-';
   const value = Math.max(0, Number(sec));
@@ -352,6 +357,7 @@ function getCurrentPosition() {
 }
 async function startLocationMode() {
   const revision = ++originRevision;
+  setOriginMode('gps');
   setLoading('현재 위치를 확인하고 있어요', '정확한 좌표는 서버 DB에 저장하지 않습니다.');
   $('manualSection').hidden = true;
   try {
@@ -389,8 +395,10 @@ async function prepareManualMode() {
   }
 }
 async function runManualSearch() {
+  setOriginMode('manual-stop');
   ++originRevision;
   currentPosition = null;
+  $('originText').textContent = '직접 선택한 정류장';
   clearInterval(refreshTimer);
   originLabel = '직접 선택한 정류장';
   const route = $('manualRoute').value;
@@ -463,6 +471,7 @@ async function selectOriginPlace(place) {
   const lat = Number(place.lat);
   const lon = Number(place.lon);
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+  setOriginMode('manual-place');
   ++originRevision;
   ++originSearchRevision;
   clearInterval(refreshTimer);
@@ -495,7 +504,7 @@ $('useCurrentOrigin').addEventListener('click', async () => {
 });
 $('locationConsentCheck').addEventListener('change', (event) => { $('allowLocationButton').disabled = !event.target.checked; });
 $('allowLocationButton').addEventListener('click', async () => { localStorage.setItem(LOCATION_CONSENT_KEY, 'granted'); hideLocationSheet(); await startLocationMode(); });
-$('manualModeButton').addEventListener('click', async () => { localStorage.setItem(LOCATION_CONSENT_KEY, 'manual'); hideLocationSheet(); ++originRevision; clearInterval(refreshTimer); currentPosition = null; $('originText').textContent = '위치 미사용'; $('loadingCard').hidden = true; $('manualSection').hidden = false; await prepareManualMode(); });
+$('manualModeButton').addEventListener('click', async () => { setOriginMode('manual-stop'); localStorage.setItem(LOCATION_CONSENT_KEY, 'manual'); hideLocationSheet(); ++originRevision; clearInterval(refreshTimer); currentPosition = null; $('originText').textContent = '위치 미사용'; $('loadingCard').hidden = true; $('manualSection').hidden = false; await prepareManualMode(); });
 $('termsButton').addEventListener('click', () => showInfo('위치정보 이용 안내', '<p><strong>이용 목적</strong><br>현재 위치에서 학교행 정류장까지의 거리와 이동시간, 통학 경로를 계산하기 위해 위치정보를 사용합니다.</p><p><strong>저장 원칙</strong><br>정확한 위도·경도는 서비스 DB에 영구 저장하지 않는 구조를 전제로 합니다. 실제 공개 운영 전에는 위치기반서비스 이용약관과 신고 의무를 별도로 최종 검토해야 합니다.</p>'));
 $('privacyButton').addEventListener('click', () => showInfo('개인정보 처리 원칙', '<p><strong>최소 수집</strong><br>경로 계산에 필요한 현재 위치만 요청합니다.</p><p><strong>대체 이용</strong><br>위치 권한을 허용하지 않아도 노선과 정류장을 직접 선택해 실시간 버스정보를 확인할 수 있습니다.</p><p><strong>외부 경로 API</strong><br>실제 보행 경로 API를 연결할 경우 해당 사업자의 이용약관·보관 제한·표시 의무를 함께 적용해야 합니다.</p>'));
 $('closeInfoSheet').addEventListener('click', () => { $('infoSheet').hidden = true; });
@@ -511,14 +520,17 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden && cu
 async function init() {
   const consent = locationConsentValue();
   if (consent === 'granted') {
+    setOriginMode('gps');
     await startLocationMode();
   } else if (consent === 'manual') {
+    setOriginMode('manual-stop');
     $('originText').textContent = '위치 미사용';
     $('loadingCard').hidden = true;
     $('manualSection').hidden = false;
     await prepareManualMode();
     setMode('수동 모드');
   } else {
+    setOriginMode('unselected');
     setLoading('현재 위치를 기준으로 통학 경로를 계산해요', '위치정보 이용 안내를 확인한 뒤 시작할 수 있습니다.');
     showLocationSheet();
   }
