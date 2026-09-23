@@ -77,3 +77,22 @@ footer{display:flex;justify-content:space-between;gap:12px;color:#5f7667;font-si
 .sheet-backdrop{position:fixed;inset:0;z-index:1000;background:rgba(1,7,3,.75);backdrop-filter:blur(10px);display:flex;align-items:flex-end;justify-content:center;padding:14px}.consent-sheet{width:min(560px,100%);background:#0e1b13;border:1px solid var(--line);border-radius:28px;padding:22px;box-shadow:0 35px 120px rgba(0,0,0,.55)}.consent-sheet.compact{max-height:80vh;overflow:auto}.sheet-handle{display:block;width:44px;height:4px;border-radius:99px;background:#425449;margin:0 auto 18px}.consent-icon{width:48px;height:48px;border-radius:15px;background:rgba(141,255,173,.12);display:grid;place-items:center;color:var(--accent);font-size:25px;margin-bottom:16px}.consent-sheet h2{margin:0;font-size:28px;letter-spacing:-.04em}.consent-copy{color:var(--muted);font-size:13px;line-height:1.65}.consent-check{display:flex;gap:9px;align-items:flex-start;border:1px solid var(--line);border-radius:14px;padding:13px;margin:16px 0}.consent-check input{margin-top:2px;accent-color:var(--accent)}.consent-check span{font-size:12px}.consent-links{display:flex;gap:12px;margin-bottom:16px}.text-button{padding:0;border:0;background:none;color:var(--accent);font-size:11px}.consent-sheet>.wide+.wide{margin-top:8px}.info-sheet-body{color:var(--muted);font-size:13px;line-height:1.75;margin:14px 0 18px}.info-sheet-body strong{color:var(--text)}
 @media(max-width:700px){.app-shell{width:min(100% - 16px,980px);padding-top:16px}.topbar{align-items:flex-start}.topbar h1{font-size:25px}.hero-card{padding:20px}.journey-grid{grid-template-columns:1fr 1fr 1fr}.journey-arrow{display:none}.route-summary-line{align-items:flex-end}.quick-info-grid{grid-template-columns:1fr 1fr 1fr}.stats-values{grid-template-columns:1fr 1fr}.manual-grid{grid-template-columns:1fr}.hero-actions{grid-template-columns:1fr 1fr}.location-strip{padding:8px 14px}.arrival-summary strong{font-size:20px}}
 @media(max-width:460px){.status-dot{padding:6px 8px}.hero-card>h2{font-size:38px}.journey-item{padding:13px 10px}.journey-item strong{font-size:17px}.route-main strong{max-width:180px}.quick-info-grid{grid-template-columns:1fr}.mini-panel{display:grid;grid-template-columns:1fr auto;align-items:center}.mini-panel strong{grid-row:1/3;grid-column:2}.mini-panel small{grid-column:1}.freshness-row{display:block}.freshness-row span{display:block;margin-top:3px}}
+
+/* Direct departure-place search */
+.origin-actions{display:flex;justify-content:flex-end;padding:10px 0 4px;border-top:1px solid var(--line)}
+.origin-actions .secondary-button{min-height:38px;padding:0 13px;font-size:12px}
+.origin-search-panel{padding:22px;margin-bottom:14px}
+.origin-search-panel .muted{font-size:13px;line-height:1.6}
+.origin-search-form{display:grid;grid-template-columns:1fr auto;gap:9px;margin:16px 0}
+.origin-search-form input{min-width:0;min-height:48px;border:1px solid var(--line);border-radius:14px;background:#09150e;color:var(--text);padding:0 14px}
+.origin-search-form input:focus-visible,.origin-result:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.origin-search-status{color:var(--muted);font-size:12px;line-height:1.6}
+.origin-search-results{display:grid;gap:8px;margin:12px 0}
+.origin-result{text-align:left;width:100%;border:1px solid var(--line);background:rgba(255,255,255,.025);border-radius:14px;padding:13px;color:var(--text)}
+.origin-result strong,.origin-result small{display:block}
+.origin-result small{font-size:11px;color:var(--muted);margin-top:5px;line-height:1.5}
+.origin-disclaimer,.origin-context{font-size:11px;color:var(--muted);line-height:1.6}
+.origin-context{margin:12px 0 0;color:var(--yellow)}
+.origin-sheet-button{display:block;margin:16px auto 0;text-align:center}
+.visually-hidden{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+@media(max-width:460px){.origin-search-panel{padding:17px}.origin-search-form{grid-template-columns:minmax(0,1fr) auto}.origin-search-form button{padding:0 13px}}

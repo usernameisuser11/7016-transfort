@@ -14,6 +14,9 @@ let activeOption = null;
 let refreshTimer = null;
 let walkApiAvailable = null;
 let calculating = false;
+let originRevision = 0;
+let originLabel = "현재 위치";
+let originSearchRevision = 0;
 
 function formatMinutes(sec) {
   if (sec == null || !Number.isFinite(Number(sec))) return '-';
@@ -184,21 +187,25 @@ async function buildOption(candidate, walk) {
 }
 async function calculateSmartCommute({ refreshBootstraps = false } = {}) {
   if (!currentPosition || calculating) return;
+  const revision = originRevision;
   calculating = true;
   clearInterval(refreshTimer);
   setLoading('가까운 학교행 정류장을 비교하고 있어요', '거리만 보지 않고 학교까지 총 소요시간을 계산합니다.');
   setMode('계산 중');
   try {
     const loaded = await loadAvailableBootstraps(refreshBootstraps);
+    if (revision !== originRevision) return;
     if (!loaded.length) throw new Error('버스 노선 정보를 불러오지 못했습니다.');
     const rawCandidates = loaded.flatMap(([route, bootstrap]) => nearestCandidates(currentPosition, route, bootstrap));
     if (!rawCandidates.length) throw new Error('위치 좌표가 포함된 학교행 정류장을 찾지 못했습니다.');
 
     const withWalk = await Promise.all(rawCandidates.map(async (candidate) => ({ candidate, walk: await walkingEstimate(currentPosition, candidate) })));
-    let accessible = withWalk.filter((x) => x.walk.durationSec <= MAX_ACCESS_WALK_SEC);
-    if (!accessible.length) accessible = withWalk.sort((a, b) => a.walk.durationSec - b.walk.durationSec).slice(0, 2);
+    if (revision !== originRevision) return;
+    const accessible = withWalk.filter((x) => x.walk.durationSec <= MAX_ACCESS_WALK_SEC);
+    if (!accessible.length) throw new Error('선택한 출발지에서 지원 노선의 승차 정류장까지 도보 25분 이내인 경로를 찾지 못했어요. 학교행 전체 대중교통 경로를 검색하는 서비스는 아니에요.');
 
     const options = await Promise.all(accessible.map((x) => buildOption(x.candidate, x.walk)));
+    if (revision !== originRevision) return;
     rankedOptions = options.filter((x) => x.viable).sort((a, b) => a.totalSec - b.totalSec);
     if (!rankedOptions.length) throw new Error('현재 위치에서 바로 탈 수 있는 차량을 찾지 못했습니다. 잠시 후 다시 확인해 주세요.');
 
@@ -212,12 +219,14 @@ async function calculateSmartCommute({ refreshBootstraps = false } = {}) {
       if (!document.hidden && currentPosition) calculateSmartCommute();
     }, 30000);
   } catch (error) {
+    if (revision !== originRevision) return;
     setLoading('자동 경로를 만들지 못했어요', error.message);
     setMode('확인 필요');
     $('manualSection').hidden = false;
     await prepareManualMode();
   } finally {
     calculating = false;
+    if (revision !== originRevision && currentPosition) queueMicrotask(() => calculateSmartCommute());
   }
 }
 
@@ -240,7 +249,7 @@ function routeDecisionText(option) {
     const diff = Math.max(1, Math.round((others[0].totalSec - option.totalSec) / 60));
     return `현재 이용 가능한 다른 경로보다 상명대 도착이 약 ${diff}분 빠릅니다. 가장 가까운 정류장이 아니라 전체 통학시간을 기준으로 계산합니다.`;
   }
-  return '현재 위치에서 현실적으로 이용 가능한 학교행 정류장 중 가장 빠른 경로입니다.';
+  return '선택한 출발지에서 현실적으로 이용 가능한 학교행 정류장 중 총 통학시간이 짧은 경로입니다.';
 }
 function renderOption(option) {
   activeOption = option;
@@ -273,6 +282,9 @@ function renderOption(option) {
   $('detailFinalWalkBadge').textContent = `도보 ${formatMinutes(option.finalWalkSec)}`;
   $('detailArrival').textContent = `${formatClockFromNow(option.totalSec)} 도착 예상 · 총 ${formatMinutes(option.totalSec)}`;
   $('routeDecisionNote').textContent = routeDecisionText(option);
+  $('detailOrigin').textContent = originLabel;
+  $('originContext').hidden = originLabel === '현재 위치';
+  $('originContext').textContent = `${originLabel}에서 지금 출발한다고 가정한 예상 시간이에요. 실제 이동 직전에 다시 확인하세요.`;
 
   renderMiniInfo(option.dashboard, option);
   renderHistorical(option.dashboard?.historical);
@@ -339,13 +351,18 @@ function getCurrentPosition() {
   });
 }
 async function startLocationMode() {
+  const revision = ++originRevision;
   setLoading('현재 위치를 확인하고 있어요', '정확한 좌표는 서버 DB에 저장하지 않습니다.');
   $('manualSection').hidden = true;
   try {
-    currentPosition = await getCurrentPosition();
+    const position = await getCurrentPosition();
+    if (revision !== originRevision) return;
+    currentPosition = position;
+    originLabel = '현재 위치';
     $('originText').textContent = currentPosition.accuracy <= 50 ? '현재 위치 · 정확도 좋음' : `현재 위치 · 오차 약 ${Math.round(currentPosition.accuracy)}m`;
     await calculateSmartCommute({ refreshBootstraps: true });
   } catch (error) {
+    if (revision !== originRevision) return;
     currentPosition = null;
     $('originText').textContent = '위치를 사용할 수 없음';
     setLoading('위치 없이도 이용할 수 있어요', error.message);
@@ -372,6 +389,10 @@ async function prepareManualMode() {
   }
 }
 async function runManualSearch() {
+  ++originRevision;
+  currentPosition = null;
+  clearInterval(refreshTimer);
+  originLabel = '직접 선택한 정류장';
   const route = $('manualRoute').value;
   const seq = Number($('manualStop').value);
   try {
@@ -402,9 +423,79 @@ async function runManualSearch() {
   }
 }
 
+function openOriginSearch() {
+  hideLocationSheet();
+  $('originSearchPanel').hidden = false;
+  $('originSearchPanel').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  $('originQuery').focus({ preventScroll: true });
+}
+async function searchOriginPlaces(event) {
+  event.preventDefault();
+  const query = $('originQuery').value.trim();
+  const status = $('originSearchStatus');
+  const results = $('originSearchResults');
+  const revision = ++originSearchRevision;
+  results.replaceChildren();
+  if (query.length < 2) { status.textContent = '장소나 주소를 두 글자 이상 입력해 주세요.'; return; }
+  status.textContent = '장소를 검색하고 있어요…';
+  try {
+    const data = await fetchJson(`/api/places?query=${encodeURIComponent(query)}`);
+    if (revision !== originSearchRevision) return;
+    if (!data.places?.length) { status.textContent = '검색 결과가 없어요. 장소명을 조금 다르게 입력해 주세요.'; return; }
+    status.textContent = '검색 결과에서 출발지를 선택하세요.';
+    data.places.forEach((place) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'origin-result';
+      const title = document.createElement('strong');
+      title.textContent = place.name;
+      const address = document.createElement('small');
+      address.textContent = place.address || '주소 정보 없음';
+      button.append(title, address);
+      button.addEventListener('click', () => selectOriginPlace(place));
+      results.appendChild(button);
+    });
+  } catch (error) {
+    if (revision === originSearchRevision) status.textContent = error.message || '장소 검색에 실패했어요.';
+  }
+}
+async function selectOriginPlace(place) {
+  const lat = Number(place.lat);
+  const lon = Number(place.lon);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+  ++originRevision;
+  ++originSearchRevision;
+  clearInterval(refreshTimer);
+  currentPosition = { lat, lon, accuracy: 0 };
+  originLabel = place.name;
+  $('originText').textContent = `직접 설정 · ${place.name}`;
+  $('originSearchPanel').hidden = true;
+  $('manualSection').hidden = true;
+  $('recommendationCard').hidden = true;
+  $('routeDetail').hidden = true;
+  $('alternativesSection').hidden = true;
+  setLoading('선택한 출발지에서 학교행 경로를 찾고 있어요', `${place.name}에서 지금 출발하는 상황을 가정합니다.`);
+  await calculateSmartCommute({ refreshBootstraps: false });
+}
+$('searchOriginFromSheet').addEventListener('click', () => {
+  localStorage.setItem(LOCATION_CONSENT_KEY, 'manual');
+  openOriginSearch();
+});
+$('openOriginSearch').addEventListener('click', openOriginSearch);
+$('closeOriginSearch').addEventListener('click', () => { $('originSearchPanel').hidden = true; });
+$('originSearchForm').addEventListener('submit', searchOriginPlaces);
+$('useCurrentOrigin').addEventListener('click', async () => {
+  $('originSearchPanel').hidden = true;
+  ++originRevision;
+  ++originSearchRevision;
+  clearInterval(refreshTimer);
+  currentPosition = null;
+  originLabel = '현재 위치';
+  await refreshLocation();
+});
 $('locationConsentCheck').addEventListener('change', (event) => { $('allowLocationButton').disabled = !event.target.checked; });
 $('allowLocationButton').addEventListener('click', async () => { localStorage.setItem(LOCATION_CONSENT_KEY, 'granted'); hideLocationSheet(); await startLocationMode(); });
-$('manualModeButton').addEventListener('click', async () => { localStorage.setItem(LOCATION_CONSENT_KEY, 'manual'); hideLocationSheet(); currentPosition = null; $('originText').textContent = '위치 미사용'; $('loadingCard').hidden = true; $('manualSection').hidden = false; await prepareManualMode(); });
+$('manualModeButton').addEventListener('click', async () => { localStorage.setItem(LOCATION_CONSENT_KEY, 'manual'); hideLocationSheet(); ++originRevision; clearInterval(refreshTimer); currentPosition = null; $('originText').textContent = '위치 미사용'; $('loadingCard').hidden = true; $('manualSection').hidden = false; await prepareManualMode(); });
 $('termsButton').addEventListener('click', () => showInfo('위치정보 이용 안내', '<p><strong>이용 목적</strong><br>현재 위치에서 학교행 정류장까지의 거리와 이동시간, 통학 경로를 계산하기 위해 위치정보를 사용합니다.</p><p><strong>저장 원칙</strong><br>정확한 위도·경도는 서비스 DB에 영구 저장하지 않는 구조를 전제로 합니다. 실제 공개 운영 전에는 위치기반서비스 이용약관과 신고 의무를 별도로 최종 검토해야 합니다.</p>'));
 $('privacyButton').addEventListener('click', () => showInfo('개인정보 처리 원칙', '<p><strong>최소 수집</strong><br>경로 계산에 필요한 현재 위치만 요청합니다.</p><p><strong>대체 이용</strong><br>위치 권한을 허용하지 않아도 노선과 정류장을 직접 선택해 실시간 버스정보를 확인할 수 있습니다.</p><p><strong>외부 경로 API</strong><br>실제 보행 경로 API를 연결할 경우 해당 사업자의 이용약관·보관 제한·표시 의무를 함께 적용해야 합니다.</p>'));
 $('closeInfoSheet').addEventListener('click', () => { $('infoSheet').hidden = true; });

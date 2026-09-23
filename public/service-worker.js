@@ -1,10 +1,10 @@
-const CACHE_NAME = 'smu-campus-v0.11.1';
+const CACHE_NAME = 'smu-campus-v0.12.0';
 const APP_SHELL = [
   '/',
   '/index.html',
-  '/smart-v5.css?v=5.0',
+  '/smart-v5.css?v=5.2',
   '/pwa.css?v=1.1',
-  '/app-v5.js?v=5.0',
+  '/app-v5.js?v=5.2',
   '/pwa.js?v=1.1',
   '/campus-arrival-guard.js?v=1.0',
   '/manifest.webmanifest',

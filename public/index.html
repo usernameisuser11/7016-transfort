@@ -13,7 +13,7 @@
   <link rel="manifest" href="/manifest.webmanifest" />
   <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
   <link rel="apple-touch-icon" href="/icons/icon-192.png" />
-  <link rel="stylesheet" href="/smart-v5.css?v=5.0" />
+  <link rel="stylesheet" href="/smart-v5.css?v=5.2" />
   <link rel="stylesheet" href="/pwa.css?v=1.1" />
 </head>
 <body>
@@ -28,6 +28,7 @@
       <div class="consent-links"><button id="termsButton" class="text-button" type="button">이용 안내 보기</button><button id="privacyButton" class="text-button" type="button">개인정보 처리 원칙</button></div>
       <button id="allowLocationButton" class="primary-button wide" type="button" disabled>동의하고 현재 위치 사용</button>
       <button id="manualModeButton" class="secondary-button wide" type="button">위치 없이 사용</button>
+      <button id="searchOriginFromSheet" class="text-button origin-sheet-button" type="button">다른 출발지를 검색해서 이용</button>
     </section>
   </div>
 
@@ -57,7 +58,7 @@
       <div class="location-row">
         <span class="location-dot" aria-hidden="true"></span>
         <div class="location-copy">
-          <small>출발</small>
+          <small>출발 위치</small>
           <strong id="originText">현재 위치 확인 전</strong>
         </div>
         <button id="refreshLocationButton" class="icon-button" type="button" aria-label="현재 위치 다시 확인">↻</button>
@@ -70,6 +71,21 @@
         </div>
         <span class="fixed-chip">고정</span>
       </div>
+      <div class="origin-actions"><button id="openOriginSearch" class="secondary-button" type="button">⌕ 다른 출발지 설정</button></div>
+    </section>
+
+    <section id="originSearchPanel" class="panel origin-search-panel" hidden>
+      <div class="section-head"><div><p class="eyebrow">START POINT</p><h3>출발지 직접 설정</h3></div><button id="closeOriginSearch" class="icon-button" type="button" aria-label="출발지 검색 닫기">×</button></div>
+      <p class="muted">장소명이나 주소를 검색해 출발지를 선택하세요. 위치 권한 없이 이용할 수 있어요.</p>
+      <form id="originSearchForm" class="origin-search-form">
+        <label for="originQuery" class="visually-hidden">출발 장소 또는 주소</label>
+        <input id="originQuery" name="query" type="search" maxlength="80" autocomplete="off" placeholder="예: 신촌역, 광화문, 서울시청" required />
+        <button class="primary-button" type="submit">검색</button>
+      </form>
+      <p id="originSearchStatus" class="origin-search-status" role="status" aria-live="polite">검색 결과에서 출발 장소를 선택하세요.</p>
+      <div id="originSearchResults" class="origin-search-results"></div>
+      <button id="useCurrentOrigin" class="secondary-button wide" type="button">◎ 현재 위치로 돌아가기</button>
+      <p class="origin-disclaimer">선택한 장소에서 지금 출발하는 상황을 가정합니다. 7016·서대문08·종로13의 학교행 경로만 비교하며, 실제 이동 전에는 버스 도착정보를 다시 확인하세요.</p>
     </section>
 
     <section id="loadingCard" class="hero-card panel loading-card">
@@ -109,6 +125,7 @@
         <div class="journey-item"><span class="journey-icon">🎓</span><small>상명대</small><strong id="campusWalk">-</strong><em>정문 기준</em></div>
       </div>
 
+      <p id="originContext" class="origin-context" hidden></p>
       <div class="freshness-row"><span id="walkSource">도보 시간 계산 중</span><span id="updatedAt">-</span></div>
       <div class="hero-actions"><button id="showRouteButton" class="primary-button" type="button">경로 자세히</button><button id="showAlternativesButton" class="secondary-button" type="button">다른 경로</button></div>
     </section>
@@ -116,7 +133,7 @@
     <section id="routeDetail" class="panel detail-card" hidden>
       <div class="section-head"><div><p class="eyebrow">ROUTE</p><h3>통학 경로</h3></div><button id="closeRouteButton" class="icon-button" type="button" aria-label="경로 닫기">×</button></div>
       <div class="vertical-route">
-        <div class="route-step"><span class="step-dot start"></span><div><small>현재 위치</small><strong id="detailOrigin">내 위치</strong><p id="detailWalk">-</p></div></div>
+        <div class="route-step"><span class="step-dot start"></span><div><small>출발지</small><strong id="detailOrigin">내 위치</strong><p id="detailWalk">-</p></div></div>
         <div class="step-line"><span id="detailWalkBadge">도보</span></div>
         <div class="route-step"><span class="step-dot bus"></span><div><small>승차 정류장</small><strong id="detailBoarding">-</strong><p id="detailBusWait">-</p></div></div>
         <div class="step-line bus-line"><span id="detailBusBadge">버스</span></div>
@@ -159,7 +176,7 @@
     </details>
 
     <footer>
-      <span>SMU Smart Commute V5.1</span>
+      <span>SMU Smart Commute V5.2</span>
       <span>위치 좌표 비저장 · AI 기능 미사용</span>
     </footer>
   </main>
@@ -270,7 +287,7 @@
       if (loadingDetail) observer.observe(loadingDetail, { childList: true, subtree: true, characterData: true });
     })();
   </script>
-  <script type="module" src="/app-v5.js?v=5.0"></script>
+  <script type="module" src="/app-v5.js?v=5.2"></script>
   <script type="module" src="/pwa.js?v=1.1"></script>
 </body>
 </html>

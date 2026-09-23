@@ -4,6 +4,7 @@ const originalPost = express.application.post;
 const originalListen = express.application.listen;
 const TMAP_APP_KEY = String(process.env.TMAP_APP_KEY || '').trim();
 const walkCache = new Map();
+const placeCache = new Map();
 
 function numberInRange(value, min, max) {
   const n = Number(value);
@@ -82,6 +83,44 @@ async function walkHandler(req, res) {
   }
 }
 
+// TMAP POI name/address search. No GPS permission required; keys stay server-side.
+async function placeHandler(req, res) {
+  if (!TMAP_APP_KEY) return res.status(501).json({ error: '장소 검색 API가 설정되지 않았습니다. 정류장 직접 선택을 이용해 주세요.' });
+  const query = String(req.query.query || '').trim();
+  if (query.length < 2 || query.length > 80) return res.status(400).json({ error: '장소명이나 주소를 2~80자로 입력해 주세요.' });
+  const cacheKey = query.toLocaleLowerCase('ko-KR');
+  const cached = placeCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < 5 * 60 * 1000) return res.json(cached.value);
+  const url = new URL('https://apis.openapi.sk.com/tmap/pois');
+  for (const [key, value] of Object.entries({
+    version: '1', searchKeyword: query, searchType: 'all', searchtypCd: 'A',
+    page: '1', count: '10', resCoordType: 'WGS84GEO',
+    reqCoordType: 'WGS84GEO', multiPoint: 'N', poiGroupYn: 'N'
+  })) url.searchParams.set(key, value);
+  try {
+    const response = await fetch(url, { headers: { Accept: 'application/json', appKey: TMAP_APP_KEY }, signal: AbortSignal.timeout(8000) });
+    const data = await response.json().catch(() => null);
+    if (!response.ok) return res.status(502).json({ error: '장소 검색 서버가 응답하지 않았어요. 잠시 후 다시 시도해 주세요.' });
+    const items = data?.searchPoiInfo?.pois?.poi || [];
+    const places = (Array.isArray(items) ? items : [items]).map((item) => {
+      const lat = Number(item.noorLat || item.frontLat);
+      const lon = Number(item.noorLon || item.frontLon);
+      return {
+        name: String(item.name || '').trim(),
+        address: [item.upperAddrName, item.middleAddrName, item.lowerAddrName, item.detailAddrName].filter(Boolean).join(' '),
+        lat, lon
+      };
+    }).filter((item) => item.name && Number.isFinite(item.lat) && Number.isFinite(item.lon)
+        && item.lat >= 33 && item.lat <= 39 && item.lon >= 124 && item.lon <= 132);
+    const value = { places: places.slice(0, 10) };
+    placeCache.set(cacheKey, { at: Date.now(), value });
+    if (placeCache.size > 100) placeCache.delete(placeCache.keys().next().value);
+    return res.json(value);
+  } catch {
+    return res.status(502).json({ error: '장소 검색에 실패했어요. 잠시 후 다시 시도해 주세요.' });
+  }
+}
+
 // V5는 AI를 사용하지 않는다. 이전 서버의 AI 엔드포인트가 등록되더라도 비활성화한다.
 express.application.post = function patchedPost(path, ...handlers) {
   if (path === '/api/ai-advice') {
@@ -93,6 +132,7 @@ express.application.post = function patchedPost(path, ...handlers) {
 // server.js가 listen 하기 직전에 위치 기반 도보 경로 API를 추가한다.
 express.application.listen = function patchedListen(...args) {
   this.post('/api/walk', walkHandler);
+  this.get('/api/places', placeHandler);
   express.application.listen = originalListen;
   return originalListen.apply(this, args);
 };
